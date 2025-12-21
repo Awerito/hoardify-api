@@ -2,8 +2,17 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, Response
 
 from app.auth import User, current_active_user
-from app.services.spotify import get_auth_manager, get_spotify_client, get_now_playing
+from app.services.spotify import (
+    get_auth_manager,
+    get_redis_client,
+    get_cached_now_playing,
+)
 from app.services.svg import generate_now_playing_svg, generate_not_playing_svg
+from app.scheduler.jobs.spotify import (
+    poll_current_playback,
+    poll_recently_played,
+    sync_artists,
+)
 
 router = APIRouter(prefix="/spotify", tags=["Spotify"])
 
@@ -26,16 +35,9 @@ async def callback(code: str):
 
 @router.get("/now-playing", summary="Get current track")
 async def now_playing():
-    """Get currently playing track or last played."""
-    auth_manager = get_auth_manager()
-    token_info = auth_manager.get_cached_token()
-    if not token_info:
-        return JSONResponse(
-            status_code=401,
-            content={"error": "Not authenticated. Visit /spotify/login first."},
-        )
-    sp = get_spotify_client()
-    data = get_now_playing(sp)
+    """Get currently playing track from Redis cache (updated by job)."""
+    redis_client = get_redis_client()
+    data = get_cached_now_playing(redis_client)
     if not data:
         return JSONResponse(
             status_code=200,
@@ -46,15 +48,9 @@ async def now_playing():
 
 @router.get("/now-playing.svg", summary="Embeddable SVG widget")
 async def now_playing_svg():
-    """Get an embeddable SVG widget showing current track."""
-    auth_manager = get_auth_manager()
-    token_info = auth_manager.get_cached_token()
-    if not token_info:
-        svg = generate_not_playing_svg()
-        return Response(content=svg, media_type="image/svg+xml")
-
-    sp = get_spotify_client()
-    data = get_now_playing(sp)
+    """Get an embeddable SVG widget showing current track from cache."""
+    redis_client = get_redis_client()
+    data = get_cached_now_playing(redis_client)
 
     if not data:
         svg = generate_not_playing_svg()
@@ -75,3 +71,24 @@ async def now_playing_svg():
             "Expires": "0",
         },
     )
+
+
+@router.post("/poll/current-playback", summary="Manually poll current playback")
+async def manual_poll_current_playback(_: User = Depends(current_active_user)):
+    """Manually trigger current playback poll."""
+    result = await poll_current_playback()
+    return result
+
+
+@router.post("/poll/recently-played", summary="Manually poll recently played")
+async def manual_poll_recently_played(_: User = Depends(current_active_user)):
+    """Manually trigger recently played poll."""
+    result = await poll_recently_played()
+    return result
+
+
+@router.post("/poll/sync-artists", summary="Manually sync artists")
+async def manual_sync_artists(_: User = Depends(current_active_user)):
+    """Manually trigger artist sync."""
+    result = await sync_artists()
+    return result

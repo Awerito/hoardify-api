@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 
 import redis
 import spotipy
@@ -6,6 +7,8 @@ from spotipy.cache_handler import CacheHandler
 from spotipy.oauth2 import SpotifyOAuth
 
 from app.config import RedisConfig, SpotifyConfig
+
+NOW_PLAYING_CACHE_KEY = "now_playing"
 
 
 class RedisCacheHandler(CacheHandler):
@@ -43,14 +46,72 @@ def get_spotify_client() -> spotipy.Spotify:
     return spotipy.Spotify(auth_manager=get_auth_manager())
 
 
-def get_now_playing(sp: spotipy.Spotify) -> dict | None:
-    """Get current playing track or last played."""
+def get_recently_played(sp: spotipy.Spotify, limit: int = 50) -> list[dict]:
+    """Fetch recently played tracks and transform to our schema."""
+    response = sp.current_user_recently_played(limit=limit)
+    plays = []
+    for item in response.get("items", []):
+        track = item["track"]
+        plays.append(
+            {
+                "track_id": track["id"],
+                "name": track["name"],
+                "artists": [a["name"] for a in track["artists"]],
+                "artist_ids": [a["id"] for a in track["artists"]],
+                "album": track["album"]["name"],
+                "album_art": (
+                    track["album"]["images"][0]["url"]
+                    if track["album"]["images"]
+                    else None
+                ),
+                "duration_ms": track["duration_ms"],
+                "played_at": item["played_at"],
+            }
+        )
+    return plays
+
+
+def get_current_playback(sp: spotipy.Spotify) -> dict | None:
+    """Fetch current playback with device/context info for storage."""
     current = sp.current_playback()
 
-    if current and current.get("is_playing"):
-        track = current["item"]
-        return {
-            "is_playing": True,
+    if not current or not current.get("item"):
+        return None
+
+    track = current["item"]
+    progress_ms = current.get("progress_ms", 0)
+    now = datetime.now(timezone.utc)
+    played_at = datetime.fromtimestamp(
+        (now.timestamp() * 1000 - progress_ms) / 1000, tz=timezone.utc
+    )
+    played_at_rounded = played_at.replace(second=0, microsecond=0)
+
+    context = current.get("context")
+    device = current.get("device")
+
+    return {
+        "play": {
+            "track_id": track["id"],
+            "name": track["name"],
+            "artists": [a["name"] for a in track["artists"]],
+            "artist_ids": [a["id"] for a in track["artists"]],
+            "album": track["album"]["name"],
+            "album_art": (
+                track["album"]["images"][0]["url"]
+                if track["album"]["images"]
+                else None
+            ),
+            "duration_ms": track["duration_ms"],
+            "played_at": played_at,
+            "played_at_rounded": played_at_rounded,
+            "device_name": device["name"] if device else None,
+            "device_type": device["type"] if device else None,
+            "context_type": context["type"] if context else None,
+            "context_uri": context["uri"] if context else None,
+            "shuffle_state": current.get("shuffle_state"),
+        },
+        "now_playing": {
+            "is_playing": current.get("is_playing", False),
             "title": track["name"],
             "artist": ", ".join(a["name"] for a in track["artists"]),
             "album": track["album"]["name"],
@@ -60,27 +121,23 @@ def get_now_playing(sp: spotipy.Spotify) -> dict | None:
                 else None
             ),
             "url": track["external_urls"]["spotify"],
-            "progress_ms": current["progress_ms"],
+            "progress_ms": progress_ms,
             "duration_ms": track["duration_ms"],
-        }
+        },
+    }
 
-    # If nothing is playing, get last played
-    recent = sp.current_user_recently_played(limit=1)
-    if recent and recent["items"]:
-        track = recent["items"][0]["track"]
-        return {
-            "is_playing": False,
-            "title": track["name"],
-            "artist": ", ".join(a["name"] for a in track["artists"]),
-            "album": track["album"]["name"],
-            "album_art": (
-                track["album"]["images"][0]["url"]
-                if track["album"]["images"]
-                else None
-            ),
-            "url": track["external_urls"]["spotify"],
-            "progress_ms": None,
-            "duration_ms": track["duration_ms"],
-        }
 
+def cache_now_playing(redis_client: redis.Redis, data: dict | None) -> None:
+    """Cache now playing data to Redis."""
+    if data is None:
+        redis_client.delete(NOW_PLAYING_CACHE_KEY)
+    else:
+        redis_client.set(NOW_PLAYING_CACHE_KEY, json.dumps(data), ex=120)
+
+
+def get_cached_now_playing(redis_client: redis.Redis) -> dict | None:
+    """Get cached now playing data from Redis."""
+    data = redis_client.get(NOW_PLAYING_CACHE_KEY)
+    if data:
+        return json.loads(data)
     return None

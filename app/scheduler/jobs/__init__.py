@@ -1,16 +1,28 @@
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from app.config import ENV
-from .example import example_job
+from .spotify import poll_current_playback, poll_recently_played, sync_artists
 
 
 def register_jobs(scheduler: AsyncIOScheduler) -> None:
-    if ENV.startswith("dev"):
-        scheduler.add_job(
-            example_job,
-            CronTrigger.from_crontab("*/5 * * * *"),
-            id="example_job",
-            replace_existing=True,
-        )  # Every 5 minutes
-    pass
+    scheduler.add_job(
+        poll_current_playback,
+        IntervalTrigger(seconds=30),
+        id="poll_current_playback",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        poll_recently_played,
+        CronTrigger.from_crontab("0 * * * *"),  # Every hour at :00
+        id="poll_recently_played",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        sync_artists,
+        CronTrigger.from_crontab("0 6,18 * * *"),  # 6 AM and 6 PM
+        id="sync_artists",
+        replace_existing=True,
+    )
