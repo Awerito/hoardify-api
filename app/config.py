@@ -46,6 +46,7 @@ class SecurityConfig:
     access_token_duration_minutes = int(
         os.getenv("ACCESS_TOKEN_DURATION_MINUTES", "30")
     )
+    admin_password_hash = os.getenv("ADMIN_PASSWORD_HASH", "")
 
 
 class DatabaseConfig:
@@ -62,3 +63,18 @@ class DatabaseConfig:
     if os.getenv("MONGO_URI"):
         parsed = urlparse(uri)
         database = parsed.path.lstrip("/") or "admin"
+
+
+class RedisConfig:
+    url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+
+class SpotifyConfig:
+    client_id = os.getenv("SPOTIPY_CLIENT_ID", "")
+    client_secret = os.getenv("SPOTIPY_CLIENT_SECRET", "")
+    redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI", "")
+    scopes = [
+        "user-read-currently-playing",
+        "user-read-playback-state",
+        "user-read-recently-played",
+    ]

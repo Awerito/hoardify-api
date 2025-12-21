@@ -11,6 +11,7 @@ from app.scheduler import start_scheduler, stop_scheduler
 
 from app.routers.healthcheck.endpoints import router as healthcheck_router
 from app.routers.auth.endpoints import router as auth_router
+from app.routers.spotify.endpoints import router as spotify_router
 
 
 @asynccontextmanager
@@ -49,3 +50,4 @@ app.add_middleware(
 # Routers
 app.include_router(healthcheck_router)
 app.include_router(auth_router)
+app.include_router(spotify_router)
