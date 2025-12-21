@@ -36,7 +36,8 @@ def _schedule_next_poll() -> None:
     if _scheduler is None:
         return
 
-    next_interval = spotify_rate_limiter.get_next_interval()
+    stats = spotify_rate_limiter.get_stats()
+    next_interval = stats["recommended_interval"]
     next_run = datetime.now() + timedelta(seconds=next_interval)
 
     try:
@@ -47,7 +48,11 @@ def _schedule_next_poll() -> None:
             id="poll_current_playback",
             replace_existing=True,
         )
-        logger.debug(f"Next poll in {next_interval}s")
+        logger.info(
+            f"Next poll in {next_interval}s "
+            f"(requests: {stats['requests_in_window']}/{stats['max_requests']}, "
+            f"usage: {stats['usage_ratio']:.0%})"
+        )
     except Exception as e:
         logger.warning(f"Failed to schedule next poll: {e}")
 
@@ -70,6 +75,7 @@ async def poll_current_playback():
         # Nothing playing - delete cache, let it expire to "Offline"
         cache_now_playing(redis_client, None)
         redis_client.delete(NOW_PLAYING_SVG_CACHE_KEY)
+        logger.info("Nothing playing")
         _schedule_next_poll()
         return {"status": "ok", "playing": False}
 
@@ -98,6 +104,9 @@ async def poll_current_playback():
             play = data["play"]
             await sync_missing_artists(db, sp, play.get("artist_ids", []))
             await sync_missing_album(db, sp, play.get("album_id"))
+
+    status = "NEW" if is_new else "playing"
+    logger.info(f"[{status}] {now_playing['artist']} - {now_playing['title']}")
 
     _schedule_next_poll()
     return {"status": "ok", "playing": True, "inserted": is_new}
