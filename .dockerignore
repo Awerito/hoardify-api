@@ -33,6 +33,7 @@ Thumbs.db
 # Tests and scripts (optional)
 tests/
 scripts/
+migrations/
 
 # Project root extras
 README.md
