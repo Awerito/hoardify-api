@@ -15,7 +15,7 @@ from app.scheduler.jobs.spotify import (
     poll_current_playback,
     poll_recently_played,
 )
-from app.services.plays import sync_all_missing_metadata, backfill_plays
+from app.services.plays import sync_all_missing_metadata
 from app.services.rate_limiter import spotify_rate_limiter
 
 router = APIRouter(prefix="/spotify", tags=["Spotify"])
@@ -86,9 +86,7 @@ async def manual_poll_recently_played(_: User = Depends(current_active_user)):
 
 @router.post("/sync-metadata", summary="Sync all missing metadata")
 async def manual_sync_metadata(_: User = Depends(current_active_user)):
-    """
-    Backfill plays with missing track data and sync missing artists/albums.
-    """
+    """Sync missing artists and albums from tracks collection."""
     auth_manager = get_auth_manager()
     token_info = auth_manager.get_cached_token()
     if not token_info:
@@ -97,17 +95,9 @@ async def manual_sync_metadata(_: User = Depends(current_active_user)):
     sp = get_spotify_client()
 
     async with MongoDBConnectionManager() as db:
-        # First backfill plays with missing track data
-        backfill_result = await backfill_plays(db, sp)
-
-        # Then sync missing artists/albums
         sync_result = await sync_all_missing_metadata(db, sp)
 
-    return {
-        "status": "ok",
-        **backfill_result,
-        **sync_result,
-    }
+    return {"status": "ok", **sync_result}
 
 
 @router.get("/rate-limit-stats", summary="Get rate limiter stats")

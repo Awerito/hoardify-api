@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 
 import spotipy
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo import UpdateOne
 
 from app.services.rate_limiter import spotify_rate_limiter
 from app.utils.logger import logger
@@ -18,135 +17,145 @@ def parse_iso_datetime(value: str | datetime) -> datetime:
     return datetime.fromisoformat(value)
 
 
-async def upsert_play(db: AsyncIOMotorDatabase, play: dict) -> bool:
+async def upsert_track(
+    db: AsyncIOMotorDatabase, track: dict, increment_count: bool = True
+) -> bool:
     """
-    Upsert a single play to the database.
-    Returns True if inserted, False if updated.
+    Upsert a track to the tracks collection.
+
+    Args:
+        db: Database connection
+        track: Track data from Spotify
+        increment_count: If True, increment listen_count. Set False for backfill.
+
+    Returns True if inserted (new track), False if updated.
     """
-    played_at = parse_iso_datetime(play.get("played_at"))
+    now = datetime.now(timezone.utc)
 
-    played_at_rounded = play.get("played_at_rounded")
-    if played_at_rounded is None and played_at:
-        played_at_rounded = played_at.replace(second=0, microsecond=0)
-
-    filter_doc = {
-        "track_id": play["track_id"],
-        "played_at_rounded": played_at_rounded,
-    }
+    filter_doc = {"track_id": track["track_id"]}
 
     update_doc = {
         "$set": {
-            "name": play["name"],
-            "artists": play["artists"],
-            "artist_ids": play["artist_ids"],
-            "album": play["album"],
-            "album_id": play.get("album_id"),
-            "album_art": play.get("album_art"),
-            "duration_ms": play["duration_ms"],
-            "explicit": play.get("explicit"),
-            "popularity": play.get("popularity"),
-            "disc_number": play.get("disc_number"),
-            "track_number": play.get("track_number"),
-            "isrc": play.get("isrc"),
-            "played_at": played_at,
-            "played_at_rounded": played_at_rounded,
+            "name": track["name"],
+            "artists": track["artists"],
+            "artist_ids": track["artist_ids"],
+            "album": track["album"],
+            "album_id": track.get("album_id"),
+            "album_art": track.get("album_art"),
+            "duration_ms": track["duration_ms"],
+            "explicit": track.get("explicit"),
+            "popularity": track.get("popularity"),
+            "disc_number": track.get("disc_number"),
+            "track_number": track.get("track_number"),
+            "isrc": track.get("isrc"),
+            "last_listened": now,
         },
         "$setOnInsert": {
-            "track_id": play["track_id"],
-            "created_at": datetime.now(timezone.utc),
+            "track_id": track["track_id"],
+            "first_listened": now,
+            "listen_count": 0,
         },
     }
 
-    if play.get("device_name") is not None:
-        update_doc["$set"]["device_name"] = play["device_name"]
-    if play.get("device_type") is not None:
-        update_doc["$set"]["device_type"] = play["device_type"]
-    if play.get("context_type") is not None:
-        update_doc["$set"]["context_type"] = play["context_type"]
-    if play.get("context_uri") is not None:
-        update_doc["$set"]["context_uri"] = play["context_uri"]
-    if play.get("shuffle_state") is not None:
-        update_doc["$set"]["shuffle_state"] = play["shuffle_state"]
+    if increment_count:
+        update_doc["$inc"] = {"listen_count": 1}
 
-    result = await db.plays.update_one(filter_doc, update_doc, upsert=True)
+    result = await db.tracks.update_one(filter_doc, update_doc, upsert=True)
     return result.upserted_id is not None
 
 
-async def upsert_plays(db: AsyncIOMotorDatabase, plays: list[dict]) -> dict:
+async def insert_play(db: AsyncIOMotorDatabase, play: dict) -> bool:
     """
-    Bulk upsert plays to the database.
-    Returns counts of inserted and updated.
+    Insert a play entry to the plays log.
+
+    Returns True if inserted, False if duplicate (already exists).
+    """
+    listened_at = parse_iso_datetime(play.get("played_at") or play.get("listened_at"))
+
+    doc = {
+        "track_id": play["track_id"],
+        "listened_at": listened_at,
+    }
+
+    # Add optional fields if present
+    if play.get("device_name") is not None:
+        doc["device_name"] = play["device_name"]
+    if play.get("device_type") is not None:
+        doc["device_type"] = play["device_type"]
+    if play.get("context_type") is not None:
+        doc["context_type"] = play["context_type"]
+    if play.get("context_uri") is not None:
+        doc["context_uri"] = play["context_uri"]
+    if play.get("shuffle_state") is not None:
+        doc["shuffle_state"] = play["shuffle_state"]
+
+    try:
+        await db.plays.insert_one(doc)
+        return True
+    except Exception:
+        # Duplicate key error - play already logged
+        return False
+
+
+async def insert_plays_bulk(db: AsyncIOMotorDatabase, plays: list[dict]) -> dict:
+    """
+    Bulk insert plays to the log. Skips duplicates.
+
+    Returns counts of inserted and skipped.
     """
     if not plays:
-        return {"inserted": 0, "updated": 0}
+        return {"inserted": 0, "skipped": 0}
 
-    operations = []
+    docs = []
     for play in plays:
-        played_at = parse_iso_datetime(play.get("played_at"))
+        listened_at = parse_iso_datetime(
+            play.get("played_at") or play.get("listened_at")
+        )
 
-        played_at_rounded = play.get("played_at_rounded")
-        if played_at_rounded is None and played_at:
-            played_at_rounded = played_at.replace(second=0, microsecond=0)
-
-        filter_doc = {
+        doc = {
             "track_id": play["track_id"],
-            "played_at_rounded": played_at_rounded,
-        }
-
-        update_doc = {
-            "$set": {
-                "name": play["name"],
-                "artists": play["artists"],
-                "artist_ids": play["artist_ids"],
-                "album": play["album"],
-                "album_id": play.get("album_id"),
-                "album_art": play.get("album_art"),
-                "duration_ms": play["duration_ms"],
-                "explicit": play.get("explicit"),
-                "popularity": play.get("popularity"),
-                "disc_number": play.get("disc_number"),
-                "track_number": play.get("track_number"),
-                "isrc": play.get("isrc"),
-                "played_at": played_at,
-                "played_at_rounded": played_at_rounded,
-            },
-            "$setOnInsert": {
-                "track_id": play["track_id"],
-                "created_at": datetime.now(timezone.utc),
-            },
+            "listened_at": listened_at,
         }
 
         if play.get("device_name") is not None:
-            update_doc["$set"]["device_name"] = play["device_name"]
+            doc["device_name"] = play["device_name"]
         if play.get("device_type") is not None:
-            update_doc["$set"]["device_type"] = play["device_type"]
+            doc["device_type"] = play["device_type"]
         if play.get("context_type") is not None:
-            update_doc["$set"]["context_type"] = play["context_type"]
+            doc["context_type"] = play["context_type"]
         if play.get("context_uri") is not None:
-            update_doc["$set"]["context_uri"] = play["context_uri"]
+            doc["context_uri"] = play["context_uri"]
         if play.get("shuffle_state") is not None:
-            update_doc["$set"]["shuffle_state"] = play["shuffle_state"]
+            doc["shuffle_state"] = play["shuffle_state"]
 
-        operations.append(UpdateOne(filter_doc, update_doc, upsert=True))
+        docs.append(doc)
 
-    result = await db.plays.bulk_write(operations)
-    return {
-        "inserted": result.upserted_count,
-        "updated": result.modified_count,
-    }
+    try:
+        result = await db.plays.insert_many(docs, ordered=False)
+        inserted = len(result.inserted_ids)
+    except Exception as e:
+        # BulkWriteError - some duplicates
+        inserted = getattr(e, "details", {}).get("nInserted", 0)
+
+    return {"inserted": inserted, "skipped": len(docs) - inserted}
 
 
-async def ensure_plays_indexes(db: AsyncIOMotorDatabase) -> None:
-    """Create indexes for the plays and artists collections."""
-    # Plays collection
+async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
+    """Create indexes for all collections."""
+    # Tracks collection
+    await db.tracks.create_index("track_id", unique=True, name="track_id_unique")
+    await db.tracks.create_index("artist_ids", name="artist_ids_idx")
+    await db.tracks.create_index("album_id", name="album_id_idx")
+    await db.tracks.create_index("listen_count", name="listen_count_idx")
+
+    # Plays collection (log)
+    await db.plays.create_index("track_id", name="track_id_idx")
+    await db.plays.create_index("listened_at", name="listened_at_idx")
     await db.plays.create_index(
-        [("track_id", 1), ("played_at_rounded", 1)],
+        [("track_id", 1), ("listened_at", 1)],
         unique=True,
-        name="track_played_unique",
+        name="track_listened_unique",
     )
-    await db.plays.create_index("played_at", name="played_at_idx")
-    await db.plays.create_index("artist_ids", name="artist_ids_idx")
-    await db.plays.create_index("album_id", name="album_id_idx")
 
     # Artists collection
     await db.artists.create_index("artist_id", unique=True, name="artist_id_unique")
@@ -205,7 +214,7 @@ async def sync_missing_artists(
 async def sync_missing_album(
     db: AsyncIOMotorDatabase, sp: spotipy.Spotify, album_id: str | None
 ) -> int:
-    """Fetch and store album if it doesn't exist in DB. Returns 1 if synced, 0 otherwise."""
+    """Fetch and store album if it doesn't exist. Returns 1 if synced, 0 otherwise."""
     if not album_id:
         return 0
 
@@ -243,17 +252,19 @@ async def sync_all_missing_metadata(
     db: AsyncIOMotorDatabase, sp: spotipy.Spotify
 ) -> dict:
     """
-    Scan all plays and sync any missing artists/albums.
+    Scan all tracks and sync any missing artists/albums.
     Returns counts of synced artists and albums.
     """
     artists_synced = 0
     albums_synced = 0
 
-    # Get all unique artist_ids from plays
-    artist_ids_cursor = db.plays.aggregate([
-        {"$unwind": "$artist_ids"},
-        {"$group": {"_id": "$artist_ids"}},
-    ])
+    # Get all unique artist_ids from tracks
+    artist_ids_cursor = db.tracks.aggregate(
+        [
+            {"$unwind": "$artist_ids"},
+            {"$group": {"_id": "$artist_ids"}},
+        ]
+    )
     all_artist_ids = [doc["_id"] async for doc in artist_ids_cursor]
 
     # Check which exist in DB
@@ -262,7 +273,9 @@ async def sync_all_missing_metadata(
     ).to_list(length=len(all_artist_ids))
     existing_artist_ids = {doc["artist_id"] for doc in existing_artists}
 
-    missing_artist_ids = [aid for aid in all_artist_ids if aid not in existing_artist_ids]
+    missing_artist_ids = [
+        aid for aid in all_artist_ids if aid not in existing_artist_ids
+    ]
 
     # Fetch missing artists in batches of 50
     for i in range(0, len(missing_artist_ids), 50):
@@ -282,7 +295,9 @@ async def sync_all_missing_metadata(
                         "genres": artist.get("genres", []),
                         "popularity": artist.get("popularity"),
                         "image": (
-                            artist["images"][0]["url"] if artist.get("images") else None
+                            artist["images"][0]["url"]
+                            if artist.get("images")
+                            else None
                         ),
                     }
                 )
@@ -291,11 +306,13 @@ async def sync_all_missing_metadata(
             await db.artists.insert_many(docs)
             artists_synced += len(docs)
 
-    # Get all unique album_ids from plays
-    album_ids_cursor = db.plays.aggregate([
-        {"$match": {"album_id": {"$ne": None}}},
-        {"$group": {"_id": "$album_id"}},
-    ])
+    # Get all unique album_ids from tracks
+    album_ids_cursor = db.tracks.aggregate(
+        [
+            {"$match": {"album_id": {"$ne": None}}},
+            {"$group": {"_id": "$album_id"}},
+        ]
+    )
     all_album_ids = [doc["_id"] async for doc in album_ids_cursor]
 
     # Check which exist in DB
@@ -344,62 +361,3 @@ async def sync_all_missing_metadata(
         )
 
     return {"artists_synced": artists_synced, "albums_synced": albums_synced}
-
-
-async def backfill_plays(db: AsyncIOMotorDatabase, sp: spotipy.Spotify) -> dict:
-    """
-    Backfill existing plays with missing track data (album_id, isrc, etc.).
-    Fetches track info from Spotify and updates plays.
-    """
-    # Find plays missing key fields
-    missing_cursor = db.plays.aggregate([
-        {
-            "$match": {
-                "$or": [
-                    {"album_id": {"$exists": False}},
-                    {"isrc": {"$exists": False}},
-                ]
-            }
-        },
-        {"$group": {"_id": "$track_id"}},
-    ])
-    missing_track_ids = [doc["_id"] async for doc in missing_cursor]
-
-    if not missing_track_ids:
-        return {"tracks_fetched": 0, "plays_updated": 0}
-
-    tracks_fetched = 0
-    plays_updated = 0
-    track_data = {}
-
-    # Fetch tracks in batches of 50
-    for i in range(0, len(missing_track_ids), 50):
-        await spotify_rate_limiter.wait_if_needed()
-        batch = missing_track_ids[i : i + 50]
-        tracks_response = sp.tracks(batch)
-        spotify_rate_limiter.record_requests(1)
-        tracks = tracks_response.get("tracks", [])
-
-        for track in tracks:
-            if track:
-                track_data[track["id"]] = {
-                    "album_id": track["album"]["id"],
-                    "explicit": track.get("explicit"),
-                    "popularity": track.get("popularity"),
-                    "disc_number": track.get("disc_number"),
-                    "track_number": track.get("track_number"),
-                    "isrc": track.get("external_ids", {}).get("isrc"),
-                }
-                tracks_fetched += 1
-
-    # Update plays with fetched data
-    for track_id, data in track_data.items():
-        result = await db.plays.update_many(
-            {"track_id": track_id},
-            {"$set": data},
-        )
-        plays_updated += result.modified_count
-
-    logger.info(f"backfill_plays: {tracks_fetched} tracks, {plays_updated} plays updated")
-
-    return {"tracks_fetched": tracks_fetched, "plays_updated": plays_updated}

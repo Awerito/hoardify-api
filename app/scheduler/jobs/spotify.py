@@ -2,7 +2,6 @@ import asyncio
 from datetime import datetime, timedelta
 
 from app.database import MongoDBConnectionManager
-from app.services.rate_limiter import spotify_rate_limiter
 from app.services.spotify import (
     get_auth_manager,
     get_spotify_client,
@@ -15,8 +14,9 @@ from app.services.spotify import (
 )
 from app.services.svg import generate_now_playing_svg
 from app.services.plays import (
-    upsert_play,
-    upsert_plays,
+    upsert_track,
+    insert_play,
+    insert_plays_bulk,
     sync_missing_artists,
     sync_missing_album,
 )
@@ -25,6 +25,8 @@ from app.utils.logger import logger
 # Will be set by register_jobs
 _scheduler = None
 
+LAST_TRACK_KEY = "spotify:last_track_id"
+
 
 def set_scheduler(scheduler) -> None:
     """Set the scheduler instance for dynamic rescheduling."""
@@ -32,13 +34,18 @@ def set_scheduler(scheduler) -> None:
     _scheduler = scheduler
 
 
-def _schedule_next_poll() -> None:
-    """Schedule next poll based on current rate limit usage."""
+def _schedule_next_poll(requests_made: int = 1) -> None:
+    """
+    Schedule next poll based on requests made this cycle.
+
+    Simple logic:
+    - 1 request (known track) → next poll in 1s
+    - 2+ requests (new track) → next poll in 2s
+    """
     if _scheduler is None:
         return
 
-    stats = spotify_rate_limiter.get_stats()
-    next_interval = stats["recommended_interval"]
+    next_interval = 2.0 if requests_made > 1 else 1.0
     next_run = datetime.now() + timedelta(seconds=next_interval)
 
     try:
@@ -50,38 +57,39 @@ def _schedule_next_poll() -> None:
             replace_existing=True,
             misfire_grace_time=60,
         )
-        logger.info(
-            f"Next poll in {next_interval}s "
-            f"(requests: {stats['requests_in_window']}/{stats['max_requests']}, "
-            f"usage: {stats['usage_ratio']:.0%})"
-        )
+        logger.debug(f"Next poll in {next_interval}s (requests this cycle: {requests_made})")
     except Exception as e:
         logger.warning(f"Failed to schedule next poll: {e}")
 
 
 async def poll_current_playback():
-    """Poll current playback dynamically, save to DB and cache to Redis."""
+    """Poll current playback, detect track changes, update tracks + plays."""
+    requests_made = 0
+
     auth_manager = get_auth_manager()
     token_info = auth_manager.get_cached_token()
     if not token_info:
-        _schedule_next_poll()
+        _schedule_next_poll(1)
         return {"status": "skipped", "reason": "not authenticated"}
 
     sp = get_spotify_client()
     redis_client = get_redis_client()
 
     data = await asyncio.to_thread(get_current_playback, sp)
-    spotify_rate_limiter.record_requests(1)
+    requests_made += 1
 
     if not data:
-        # Nothing playing - delete cache, let it expire to "Offline"
+        # Nothing playing - clear cache and last_track_id
         cache_now_playing(redis_client, None)
         redis_client.delete(NOW_PLAYING_SVG_CACHE_KEY)
+        redis_client.delete(LAST_TRACK_KEY)
         logger.info("Nothing playing")
-        _schedule_next_poll()
+        _schedule_next_poll(requests_made)
         return {"status": "ok", "playing": False}
 
     now_playing = data["now_playing"]
+    play = data["play"]
+    current_track_id = play["track_id"]
 
     # Calculate TTL: remaining time + 30 sec buffer
     remaining_ms = now_playing["duration_ms"] - now_playing["progress_ms"]
@@ -98,24 +106,47 @@ async def poll_current_playback():
     )
     cache_now_playing_svg(redis_client, svg, ttl_seconds)
 
-    async with MongoDBConnectionManager() as db:
-        is_new = await upsert_play(db, data["play"])
+    # Check if track changed
+    last_track_id = redis_client.get(LAST_TRACK_KEY)
+    if last_track_id:
+        last_track_id = last_track_id.decode("utf-8")
 
-        # Sync missing artists/album if new play
-        if is_new:
-            play = data["play"]
-            await sync_missing_artists(db, sp, play.get("artist_ids", []))
-            await sync_missing_album(db, sp, play.get("album_id"))
+    is_new_listen = current_track_id != last_track_id
 
-    status = "NEW" if is_new else "playing"
-    logger.info(f"[{status}] {now_playing['artist']} - {now_playing['title']}")
+    if is_new_listen:
+        async with MongoDBConnectionManager() as db:
+            # Upsert track (increments listen_count)
+            is_new_track = await upsert_track(db, play, increment_count=True)
 
-    _schedule_next_poll()
-    return {"status": "ok", "playing": True, "inserted": is_new}
+            # Insert play to log
+            await insert_play(db, play)
+
+            # Sync missing artists/album if new track
+            if is_new_track:
+                artists_synced = await sync_missing_artists(
+                    db, sp, play.get("artist_ids", [])
+                )
+                if artists_synced > 0:
+                    requests_made += 1
+
+                album_synced = await sync_missing_album(db, sp, play.get("album_id"))
+                if album_synced > 0:
+                    requests_made += 1
+
+        # Update last track in Redis
+        redis_client.set(LAST_TRACK_KEY, current_track_id)
+
+        status = "NEW TRACK" if is_new_track else "NEW LISTEN"
+        logger.info(f"[{status}] {now_playing['artist']} - {now_playing['title']}")
+    else:
+        logger.debug(f"[playing] {now_playing['artist']} - {now_playing['title']}")
+
+    _schedule_next_poll(requests_made)
+    return {"status": "ok", "playing": True, "new_listen": is_new_listen}
 
 
 async def poll_recently_played():
-    """Poll recently played every hour, save to DB with exact played_at."""
+    """Poll recently played every hour, backfill plays log."""
     auth_manager = get_auth_manager()
     token_info = auth_manager.get_cached_token()
     if not token_info:
@@ -123,16 +154,20 @@ async def poll_recently_played():
 
     sp = get_spotify_client()
     plays = await asyncio.to_thread(get_recently_played, sp, 50)
-    spotify_rate_limiter.record_requests(1)
 
     if not plays:
         return {"status": "ok", "plays": 0}
 
     async with MongoDBConnectionManager() as db:
-        result = await upsert_plays(db, plays)
+        # Insert plays to log (skips duplicates)
+        result = await insert_plays_bulk(db, plays)
+
+        # Upsert tracks without incrementing count (backfill only)
+        for play in plays:
+            await upsert_track(db, play, increment_count=False)
 
     logger.info(
         f"poll_recently_played: {result['inserted']} inserted, "
-        f"{result['updated']} updated"
+        f"{result['skipped']} skipped"
     )
     return {"status": "ok", **result}

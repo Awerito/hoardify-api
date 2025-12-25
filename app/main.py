@@ -8,7 +8,7 @@ from app.auth import create_admin_user
 from app.database import check_mongo_connection
 from app.config import FastAPIConfig, CorsConfig, ENV
 from app.scheduler import start_scheduler, stop_scheduler
-from app.services.plays import ensure_plays_indexes
+from app.services.plays import ensure_indexes
 
 from app.routers.healthcheck.endpoints import router as healthcheck_router
 from app.routers.auth.endpoints import router as auth_router
@@ -18,7 +18,7 @@ from app.routers.spotify.endpoints import router as spotify_router
 async def on_db_ready(db):
     """Run setup tasks after database connection is ready."""
     await create_admin_user(db)
-    await ensure_plays_indexes(db)
+    await ensure_indexes(db)
 
 
 @asynccontextmanager

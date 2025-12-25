@@ -17,8 +17,8 @@ class AdaptiveRateLimiter:
     def __init__(
         self,
         window_seconds: int = 30,
-        max_requests: int = 90,  # ~50% of estimated 180/min limit
-        min_interval: float = 3.0,
+        max_requests: int = 90,  # 180/min self-imposed limit (Spotify allows ~180/min)
+        min_interval: float = 1.0,
         max_interval: float = 30.0,
         base_interval: float = 5.0,
     ):
