@@ -1,12 +1,19 @@
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from zoneinfo import ZoneInfo
 
+import cairosvg
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app.database import MongoDBConnectionManager
 from app.services.svg import generate_listening_grid_svg
+
+
+class GridFormat(str, Enum):
+    svg = "svg"
+    png = "png"
 
 
 DISPLAY_TZ = "America/Santiago"
@@ -253,9 +260,15 @@ async def get_plays_by_day_hour(days: int = 7) -> dict[str, dict[int, dict]]:
     return plays_by_day_hour
 
 
-@router.get("/grid.svg", summary="Listening grid (SVG)")
-async def listening_grid_svg(days: int = 7):
-    """Generate a GitHub-style listening grid SVG with album art.
+@router.get("/grid.svg", summary="Listening grid (SVG) - deprecated")
+async def listening_grid_svg_legacy(days: int = 7):
+    """Deprecated: Use /grid?format=svg instead."""
+    return await listening_grid(days=days, format=GridFormat.svg)
+
+
+@router.get("/grid", summary="Listening grid")
+async def listening_grid(days: int = 7, format: GridFormat = GridFormat.svg):
+    """Generate a GitHub-style listening grid with album art.
 
     Shows listening activity over multiple days.
     - Rows: days (oldest at top)
@@ -264,8 +277,23 @@ async def listening_grid_svg(days: int = 7):
 
     Query params:
         days: Number of days to show (default 7, max 30)
+        format: Output format - svg or png (default svg)
+                Use png for GitHub READMEs (GitHub blocks SVGs with embedded images)
     """
     days = min(max(days, 1), 30)  # Clamp to 1-30
     plays_by_day_hour = await get_plays_by_day_hour(days)
     svg = generate_listening_grid_svg(plays_by_day_hour)
-    return Response(content=svg, media_type="image/svg+xml")
+
+    if format == GridFormat.png:
+        png = cairosvg.svg2png(bytestring=svg.encode("utf-8"))
+        return Response(
+            content=png,
+            media_type="image/png",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
+
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
