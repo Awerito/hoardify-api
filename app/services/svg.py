@@ -1,5 +1,6 @@
 import base64
 import urllib.request
+from datetime import datetime
 
 
 def fetch_image_as_base64(url: str) -> str | None:
@@ -86,5 +87,147 @@ def generate_not_playing_svg() -> str:
   </text>
   <text x="200" y="65" fill="#6b7280" font-family="monospace" font-size="13" text-anchor="middle">
     Nothing playing right now
+  </text>
+</svg>"""
+
+
+def generate_listening_grid_svg(
+    plays_by_day_hour: dict[str, dict[int, dict]],
+    cell_size: int = 12,
+    gap: int = 2,
+) -> str:
+    """Generate a GitHub-style listening grid with album art.
+
+    Args:
+        plays_by_day_hour: Dict mapping date string (YYYY-MM-DD) to
+                          dict mapping hour (0-23) to play data.
+        cell_size: Size of each cell in pixels.
+        gap: Gap between cells.
+
+    Layout: Rows = days (oldest at top), Columns = 24 hours
+    Each cell shows album art of last track played in that hour.
+    """
+    if not plays_by_day_hour:
+        return generate_empty_grid_svg("No listening data")
+
+    # Sort days (oldest first, newest at bottom like GitHub)
+    sorted_days = sorted(plays_by_day_hour.keys())
+    num_days = len(sorted_days)
+
+    # Layout
+    day_label_width = 45
+    hour_label_height = 15
+    title_height = 22
+    padding = 8
+
+    grid_width = 24 * (cell_size + gap) - gap
+    grid_height = num_days * (cell_size + gap) - gap
+
+    width = day_label_width + grid_width + padding * 2
+    height = title_height + hour_label_height + grid_height + padding * 2
+
+    # Calculate totals
+    total_plays = sum(
+        play.get("play_count", 1)
+        for day_data in plays_by_day_hour.values()
+        for play in day_data.values()
+    )
+
+    # Font
+    font = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
+
+    svg_parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        f'  <rect width="{width}" height="{height}" rx="6" fill="#0d1117"/>',
+        # Title
+        f'  <text x="{padding}" y="{padding + 14}" fill="#e6edf3" font-family="{font}" font-size="12" font-weight="600">Listening Activity</text>',
+        f'  <text x="{width - padding}" y="{padding + 14}" fill="#8b949e" font-family="{font}" font-size="10" text-anchor="end">{total_plays} plays</text>',
+    ]
+
+    # Hour labels (every 6 hours: 0, 6, 12, 18)
+    for hour in [0, 6, 12, 18]:
+        x = padding + day_label_width + hour * (cell_size + gap) + cell_size // 2
+        y = title_height + padding + 10
+        svg_parts.append(
+            f'  <text x="{x}" y="{y}" fill="#8b949e" font-family="{font}" font-size="9" text-anchor="middle">{hour}h</text>'
+        )
+
+    # Cache for album art to avoid re-fetching
+    album_art_cache: dict[str, str | None] = {}
+
+    # Grid
+    grid_start_y = title_height + hour_label_height + padding
+
+    for row_idx, day in enumerate(sorted_days):
+        y = grid_start_y + row_idx * (cell_size + gap)
+        day_data = plays_by_day_hour[day]
+
+        # Day label (show weekday abbreviation)
+        day_date = datetime.strptime(day, "%Y-%m-%d")
+        weekday = day_date.strftime("%a")
+        day_num = day_date.strftime("%d")
+
+        svg_parts.append(
+            f'  <text x="{padding + day_label_width - 5}" y="{y + cell_size - 2}" fill="#8b949e" font-family="{font}" font-size="9" text-anchor="end">{weekday} {day_num}</text>'
+        )
+
+        # Hour cells
+        for hour in range(24):
+            x = padding + day_label_width + hour * (cell_size + gap)
+            play = day_data.get(hour)
+
+            if play:
+                track_name = play.get("name", "Unknown")
+                track_name_escaped = (
+                    track_name.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace('"', "&quot;")
+                )
+                play_count = play.get("play_count", 1)
+                tooltip = f"{day} {hour:02d}:00\n{track_name_escaped}\n({play_count} plays)"
+
+                # Try to get album art
+                album_art_url = play.get("album_art")
+                album_art_b64 = None
+
+                if album_art_url:
+                    if album_art_url in album_art_cache:
+                        album_art_b64 = album_art_cache[album_art_url]
+                    else:
+                        album_art_b64 = fetch_image_as_base64(album_art_url)
+                        album_art_cache[album_art_url] = album_art_b64
+
+                if album_art_b64:
+                    svg_parts.append(
+                        f'  <image x="{x}" y="{y}" width="{cell_size}" height="{cell_size}" '
+                        f'href="data:image/jpeg;base64,{album_art_b64}" preserveAspectRatio="xMidYMid slice">'
+                        f"<title>{tooltip}</title></image>"
+                    )
+                else:
+                    # Fallback: Spotify green
+                    svg_parts.append(
+                        f'  <rect x="{x}" y="{y}" width="{cell_size}" height="{cell_size}" '
+                        f'rx="2" fill="#1DB954"><title>{tooltip}</title></rect>'
+                    )
+            else:
+                # Empty cell
+                tooltip = f"{day} {hour:02d}:00 - No plays"
+                svg_parts.append(
+                    f'  <rect x="{x}" y="{y}" width="{cell_size}" height="{cell_size}" '
+                    f'rx="2" fill="#161b22"><title>{tooltip}</title></rect>'
+                )
+
+    svg_parts.append("</svg>")
+    return "\n".join(svg_parts)
+
+
+def generate_empty_grid_svg(title: str = "Today's Listening") -> str:
+    """SVG for when there are no plays."""
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="320" height="80" viewBox="0 0 320 80">
+  <rect width="320" height="80" rx="6" fill="#0d1117"/>
+  <text x="10" y="20" fill="#8b949e" font-family="system-ui, sans-serif" font-size="12" font-weight="600">{title}</text>
+  <text x="160" y="52" fill="#6b7280" font-family="system-ui, sans-serif" font-size="11" text-anchor="middle">
+    No plays yet
   </text>
 </svg>"""

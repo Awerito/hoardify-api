@@ -1,10 +1,11 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app.database import MongoDBConnectionManager
+from app.services.svg import generate_listening_grid_svg
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 templates = Jinja2Templates(directory="app/templates")
@@ -160,3 +161,95 @@ async def today_stats_html(request: Request):
         "dashboard/today.html",
         {"stats": stats},
     )
+
+
+async def get_plays_by_day_hour(days: int = 7) -> dict[str, dict[int, dict]]:
+    """Get last play per hour for each day in the grid.
+
+    Args:
+        days: Number of days to include (default 7).
+
+    Returns:
+        Dict mapping date string to dict mapping hour to play data.
+    """
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    start_date = now - timedelta(days=days)
+
+    async with MongoDBConnectionManager() as db:
+        pipeline = [
+            {"$match": {"listened_at": {"$gte": start_date, "$lt": now}}},
+            {"$sort": {"listened_at": 1}},
+            # Group first - get last track_id per hour
+            {
+                "$group": {
+                    "_id": {
+                        "date": {
+                            "$dateToString": {
+                                "format": "%Y-%m-%d",
+                                "date": "$listened_at",
+                            }
+                        },
+                        "hour": {"$hour": "$listened_at"},
+                    },
+                    "last_track_id": {"$last": "$track_id"},
+                    "play_count": {"$sum": 1},
+                }
+            },
+            # JOIN only with unique hour entries (~168 max for 7 days)
+            {
+                "$lookup": {
+                    "from": "tracks",
+                    "localField": "last_track_id",
+                    "foreignField": "track_id",
+                    "as": "track",
+                }
+            },
+            {"$unwind": "$track"},
+            {
+                "$project": {
+                    "_id": 0,
+                    "date": "$_id.date",
+                    "hour": "$_id.hour",
+                    "track_id": "$last_track_id",
+                    "name": "$track.name",
+                    "album_art": "$track.album_art",
+                    "play_count": 1,
+                }
+            },
+        ]
+        plays = await db.plays.aggregate(pipeline).to_list(length=500)
+
+    # Build result dict
+    plays_by_day_hour: dict[str, dict[int, dict]] = {}
+
+    # Initialize all days in range
+    for i in range(days):
+        day = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+        plays_by_day_hour[day] = {}
+
+    for play in plays:
+        day = play["date"]
+        hour = play["hour"]
+        if day not in plays_by_day_hour:
+            plays_by_day_hour[day] = {}
+        plays_by_day_hour[day][hour] = play
+
+    return plays_by_day_hour
+
+
+@router.get("/grid.svg", summary="Listening grid (SVG)")
+async def listening_grid_svg(days: int = 7):
+    """Generate a GitHub-style listening grid SVG with album art.
+
+    Shows listening activity over multiple days.
+    - Rows: days (oldest at top)
+    - Columns: 24 hours
+    - Cells: album art of last track played in that hour
+
+    Query params:
+        days: Number of days to show (default 7, max 30)
+    """
+    days = min(max(days, 1), 30)  # Clamp to 1-30
+    plays_by_day_hour = await get_plays_by_day_hour(days)
+    svg = generate_listening_grid_svg(plays_by_day_hour)
+    return Response(content=svg, media_type="image/svg+xml")
