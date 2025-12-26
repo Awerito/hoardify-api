@@ -179,11 +179,13 @@ async def get_plays_by_day_hour(days: int = 7) -> dict[str, dict[int, dict]]:
     """
     # Calculate date range in Chilean time
     local_tz = ZoneInfo(DISPLAY_TZ)
-    now_local = datetime.now(local_tz).replace(minute=0, second=0, microsecond=0)
-    start_local = now_local - timedelta(days=days)
+    now_local = datetime.now(local_tz)
 
-    # Convert to UTC for MongoDB query
+    # Convert to UTC for MongoDB query (include up to current moment)
     now_utc = now_local.astimezone(timezone.utc)
+
+    # Start from beginning of hour, days ago
+    start_local = now_local.replace(minute=0, second=0, microsecond=0) - timedelta(days=days)
     start_utc = start_local.astimezone(timezone.utc)
 
     async with MongoDBConnectionManager() as db:
