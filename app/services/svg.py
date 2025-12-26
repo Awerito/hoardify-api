@@ -1,5 +1,4 @@
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime
 
 from app.services.cache import (
     cache_album_art,
@@ -91,29 +90,19 @@ def generate_listening_grid_svg(
     plays_by_day_hour: dict[str, dict[int, dict]],
     cell_size: int = 12,
     gap: int = 2,
-    display_tz: str = "America/Santiago",
 ) -> str:
     """Generate a GitHub-style listening grid with album art.
 
     Args:
         plays_by_day_hour: Dict mapping date string (YYYY-MM-DD) to
                           dict mapping hour (0-23) to play data.
+                          Dates/hours should already be in local timezone.
         cell_size: Size of each cell in pixels.
         gap: Gap between cells.
-        display_tz: Timezone for displaying times in tooltips (default: Chile).
 
     Layout: Rows = days (oldest at top), Columns = 24 hours
     Each cell shows album art of last track played in that hour.
     """
-
-    def utc_to_local(day_str: str, hour: int) -> tuple[str, int]:
-        """Convert UTC day+hour to local timezone for display."""
-        utc_dt = datetime.strptime(f"{day_str} {hour:02d}", "%Y-%m-%d %H").replace(
-            tzinfo=timezone.utc
-        )
-        local_dt = utc_dt.astimezone(ZoneInfo(display_tz))
-        return local_dt.strftime("%Y-%m-%d"), local_dt.hour
-
     if not plays_by_day_hour:
         return generate_empty_grid_svg("No listening data")
 
@@ -192,8 +181,9 @@ def generate_listening_grid_svg(
                     .replace('"', "&quot;")
                 )
                 play_count = play.get("play_count", 1)
-                local_day, local_hour = utc_to_local(day, hour)
-                tooltip = f"{local_day} {local_hour:02d}:00\n{track_name_escaped}\n({play_count} plays)"
+                tooltip = (
+                    f"{day} {hour:02d}:00\n{track_name_escaped}\n({play_count} plays)"
+                )
 
                 # Try to get album art (Redis cache with 7 day TTL)
                 album_art_url = play.get("album_art")
@@ -220,8 +210,7 @@ def generate_listening_grid_svg(
                     )
             else:
                 # Empty cell
-                local_day, local_hour = utc_to_local(day, hour)
-                tooltip = f"{local_day} {local_hour:02d}:00 - No plays"
+                tooltip = f"{day} {hour:02d}:00 - No plays"
                 svg_parts.append(
                     f'  <rect x="{x}" y="{y}" width="{cell_size}" height="{cell_size}" '
                     f'rx="2" fill="#161b22"><title>{tooltip}</title></rect>'

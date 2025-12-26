@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
@@ -6,6 +7,9 @@ from fastapi.templating import Jinja2Templates
 
 from app.database import MongoDBConnectionManager
 from app.services.svg import generate_listening_grid_svg
+
+
+DISPLAY_TZ = "America/Santiago"
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 templates = Jinja2Templates(directory="app/templates")
@@ -171,15 +175,22 @@ async def get_plays_by_day_hour(days: int = 7) -> dict[str, dict[int, dict]]:
 
     Returns:
         Dict mapping date string to dict mapping hour to play data.
+        Dates and hours are in Chilean time (America/Santiago).
     """
-    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
-    start_date = now - timedelta(days=days)
+    # Calculate date range in Chilean time
+    local_tz = ZoneInfo(DISPLAY_TZ)
+    now_local = datetime.now(local_tz).replace(minute=0, second=0, microsecond=0)
+    start_local = now_local - timedelta(days=days)
+
+    # Convert to UTC for MongoDB query
+    now_utc = now_local.astimezone(timezone.utc)
+    start_utc = start_local.astimezone(timezone.utc)
 
     async with MongoDBConnectionManager() as db:
         pipeline = [
-            {"$match": {"listened_at": {"$gte": start_date, "$lt": now}}},
+            {"$match": {"listened_at": {"$gte": start_utc, "$lt": now_utc}}},
             {"$sort": {"listened_at": 1}},
-            # Group first - get last track_id per hour
+            # Group by Chilean time (not UTC)
             {
                 "$group": {
                     "_id": {
@@ -187,9 +198,12 @@ async def get_plays_by_day_hour(days: int = 7) -> dict[str, dict[int, dict]]:
                             "$dateToString": {
                                 "format": "%Y-%m-%d",
                                 "date": "$listened_at",
+                                "timezone": DISPLAY_TZ,
                             }
                         },
-                        "hour": {"$hour": "$listened_at"},
+                        "hour": {
+                            "$hour": {"date": "$listened_at", "timezone": DISPLAY_TZ}
+                        },
                     },
                     "last_track_id": {"$last": "$track_id"},
                     "play_count": {"$sum": 1},
@@ -222,9 +236,9 @@ async def get_plays_by_day_hour(days: int = 7) -> dict[str, dict[int, dict]]:
     # Build result dict
     plays_by_day_hour: dict[str, dict[int, dict]] = {}
 
-    # Initialize all days in range
+    # Initialize all days in range (Chilean time)
     for i in range(days):
-        day = (start_date + timedelta(days=i)).strftime("%Y-%m-%d")
+        day = (start_local + timedelta(days=i)).strftime("%Y-%m-%d")
         plays_by_day_hour[day] = {}
 
     for play in plays:
