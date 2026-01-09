@@ -1,9 +1,15 @@
 from datetime import datetime, timedelta
 
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from .spotify import poll_current_playback, poll_recently_played, set_scheduler
+from .spotify import (
+    poll_current_playback,
+    poll_recently_played,
+    ensure_poller_alive,
+    set_scheduler,
+)
 
 
 def register_jobs(scheduler: AsyncIOScheduler) -> None:
@@ -24,6 +30,14 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
         poll_recently_played,
         CronTrigger.from_crontab("0 * * * *"),  # Every hour at :00
         id="poll_recently_played",
+        replace_existing=True,
+    )
+
+    # Watchdog: check every 30 seconds if poller is alive
+    scheduler.add_job(
+        ensure_poller_alive,
+        IntervalTrigger(seconds=30),
+        id="poller_watchdog",
         replace_existing=True,
     )
 

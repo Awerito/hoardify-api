@@ -26,6 +26,7 @@ from app.utils.logger import logger
 _scheduler = None
 
 LAST_TRACK_KEY = "spotify:last_track_id"
+SPOTIFY_API_TIMEOUT = 10  # seconds
 
 
 def set_scheduler(scheduler) -> None:
@@ -34,7 +35,7 @@ def set_scheduler(scheduler) -> None:
     _scheduler = scheduler
 
 
-def _schedule_next_poll(requests_made: int = 1) -> None:
+def _schedule_next_poll(requests_made: int = 1, reason: str = "") -> None:
     """
     Schedule next poll based on requests made this cycle.
 
@@ -43,6 +44,7 @@ def _schedule_next_poll(requests_made: int = 1) -> None:
     - 2+ requests (new track) → next poll in 2s
     """
     if _scheduler is None:
+        logger.error("Cannot schedule next poll: scheduler is None")
         return
 
     next_interval = 2.0 if requests_made > 1 else 1.0
@@ -57,25 +59,41 @@ def _schedule_next_poll(requests_made: int = 1) -> None:
             replace_existing=True,
             misfire_grace_time=60,
         )
-        logger.debug(f"Next poll in {next_interval}s (requests this cycle: {requests_made})")
+        if reason:
+            logger.debug(f"Next poll in {next_interval}s ({reason})")
     except Exception as e:
-        logger.warning(f"Failed to schedule next poll: {e}")
+        logger.error(f"Failed to schedule next poll: {e}")
 
 
 async def poll_current_playback():
     """Poll current playback, detect track changes, update tracks + plays."""
     requests_made = 0
+    schedule_reason = "poll"
 
     try:
         auth_manager = get_auth_manager()
         token_info = auth_manager.get_cached_token()
         if not token_info:
+            logger.warning("poll_current_playback skipped: no token cached")
+            schedule_reason = "no token"
             return {"status": "skipped", "reason": "not authenticated"}
 
         sp = get_spotify_client()
         redis_client = get_redis_client()
 
-        data = await asyncio.to_thread(get_current_playback, sp)
+        # Wrap Spotify API call with timeout to prevent hanging
+        try:
+            data = await asyncio.wait_for(
+                asyncio.to_thread(get_current_playback, sp),
+                timeout=SPOTIFY_API_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.error(
+                f"poll_current_playback: Spotify API timeout ({SPOTIFY_API_TIMEOUT}s)"
+            )
+            schedule_reason = "api timeout"
+            return {"status": "error", "reason": "spotify api timeout"}
+
         requests_made += 1
 
         if not data:
@@ -84,6 +102,7 @@ async def poll_current_playback():
             redis_client.delete(NOW_PLAYING_SVG_CACHE_KEY)
             redis_client.delete(LAST_TRACK_KEY)
             logger.info("Nothing playing")
+            schedule_reason = "nothing playing"
             return {"status": "ok", "playing": False}
 
         now_playing = data["now_playing"]
@@ -131,7 +150,9 @@ async def poll_current_playback():
                     if artists_synced > 0:
                         requests_made += 1
 
-                    album_synced = await sync_missing_album(db, sp, play.get("album_id"))
+                    album_synced = await sync_missing_album(
+                        db, sp, play.get("album_id")
+                    )
                     if album_synced > 0:
                         requests_made += 1
 
@@ -140,17 +161,33 @@ async def poll_current_playback():
 
             status = "NEW TRACK" if is_new_track else "NEW LISTEN"
             logger.info(f"[{status}] {now_playing['artist']} - {now_playing['title']}")
+            schedule_reason = "new listen"
         else:
-            logger.debug(f"[playing] {now_playing['artist']} - {now_playing['title']}")
+            schedule_reason = "same track"
 
         return {"status": "ok", "playing": True, "new_listen": is_new_listen}
 
     except Exception as e:
-        logger.error(f"poll_current_playback failed: {e}")
+        logger.error(f"poll_current_playback failed: {e}", exc_info=True)
+        schedule_reason = f"error: {type(e).__name__}"
         return {"status": "error", "reason": str(e)}
 
     finally:
-        _schedule_next_poll(requests_made)
+        _schedule_next_poll(requests_made, schedule_reason)
+
+
+def ensure_poller_alive() -> None:
+    """Watchdog: ensure poll_current_playback job exists, revive if dead."""
+    if _scheduler is None:
+        logger.error("Watchdog: scheduler is None")
+        return
+
+    job = _scheduler.get_job("poll_current_playback")
+    if job is None:
+        logger.warning("Watchdog: poll_current_playback job not found, reviving...")
+        _schedule_next_poll(1, "watchdog revive")
+    else:
+        logger.debug(f"Watchdog: poller alive, next run at {job.next_run_time}")
 
 
 async def poll_recently_played():
