@@ -1,15 +1,26 @@
-import json
 import statistics
-from datetime import datetime
+from datetime import datetime, timezone
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.database import MongoDBConnectionManager
-from app.services.cache import get_redis_client
 
 DISPLAY_TZ = "America/Santiago"
-DASHBOARD_CACHE_KEY = "dashboard:payload"
-DASHBOARD_TTL = 900  # 15 min
+STATS_COLLECTION = "dashboard_stats"
+STATS_ID = "current"
+
+# plays -> tracks join, reused across aggregations
+TRACK_LOOKUP = [
+    {
+        "$lookup": {
+            "from": "tracks",
+            "localField": "track_id",
+            "foreignField": "track_id",
+            "as": "t",
+        }
+    },
+    {"$unwind": "$t"},
+]
 
 
 async def _totals(db: AsyncIOMotorDatabase) -> dict:
@@ -25,15 +36,7 @@ async def _totals(db: AsyncIOMotorDatabase) -> dict:
 async def _total_minutes(db: AsyncIOMotorDatabase) -> int:
     res = await db.plays.aggregate(
         [
-            {
-                "$lookup": {
-                    "from": "tracks",
-                    "localField": "track_id",
-                    "foreignField": "track_id",
-                    "as": "t",
-                }
-            },
-            {"$unwind": "$t"},
+            *TRACK_LOOKUP,
             {"$group": {"_id": None, "ms": {"$sum": "$t.duration_ms"}}},
         ]
     ).to_list(length=1)
@@ -60,15 +63,7 @@ async def _plays_per_month(db: AsyncIOMotorDatabase) -> list[dict]:
 async def _top_artists(db: AsyncIOMotorDatabase) -> list[dict]:
     return await db.plays.aggregate(
         [
-            {
-                "$lookup": {
-                    "from": "tracks",
-                    "localField": "track_id",
-                    "foreignField": "track_id",
-                    "as": "t",
-                }
-            },
-            {"$unwind": "$t"},
+            *TRACK_LOOKUP,
             {"$unwind": "$t.artist_ids"},
             {"$group": {"_id": "$t.artist_ids", "plays": {"$sum": 1}}},
             {"$sort": {"plays": -1}},
@@ -88,7 +83,6 @@ async def _top_artists(db: AsyncIOMotorDatabase) -> list[dict]:
                     "name": "$a.name",
                     "plays": 1,
                     "image": "$a.image",
-                    "genres": "$a.genres",
                 }
             },
         ]
@@ -99,15 +93,7 @@ async def _top_albums(db: AsyncIOMotorDatabase) -> list[dict]:
     """Top albums by plays, each with its per-month series (for the muro slider)."""
     albums = await db.plays.aggregate(
         [
-            {
-                "$lookup": {
-                    "from": "tracks",
-                    "localField": "track_id",
-                    "foreignField": "track_id",
-                    "as": "t",
-                }
-            },
-            {"$unwind": "$t"},
+            *TRACK_LOOKUP,
             {
                 "$group": {
                     "_id": "$t.album_id",
@@ -133,15 +119,7 @@ async def _top_albums(db: AsyncIOMotorDatabase) -> list[dict]:
     top_ids = [a["album_id"] for a in albums]
     monthly_rows = await db.plays.aggregate(
         [
-            {
-                "$lookup": {
-                    "from": "tracks",
-                    "localField": "track_id",
-                    "foreignField": "track_id",
-                    "as": "t",
-                }
-            },
-            {"$unwind": "$t"},
+            *TRACK_LOOKUP,
             {"$match": {"t.album_id": {"$in": top_ids}}},
             {
                 "$group": {
@@ -196,15 +174,7 @@ async def _top_tracks(db: AsyncIOMotorDatabase) -> list[dict]:
 async def _top_genres(db: AsyncIOMotorDatabase) -> list[dict]:
     rows = await db.plays.aggregate(
         [
-            {
-                "$lookup": {
-                    "from": "tracks",
-                    "localField": "track_id",
-                    "foreignField": "track_id",
-                    "as": "t",
-                }
-            },
-            {"$unwind": "$t"},
+            *TRACK_LOOKUP,
             {"$unwind": "$t.artist_ids"},
             {
                 "$lookup": {
@@ -316,15 +286,7 @@ async def _era(db: AsyncIOMotorDatabase) -> dict:
     """Median/oldest/newest release year of what you play, weighted by plays."""
     rows = await db.plays.aggregate(
         [
-            {
-                "$lookup": {
-                    "from": "tracks",
-                    "localField": "track_id",
-                    "foreignField": "track_id",
-                    "as": "t",
-                }
-            },
-            {"$unwind": "$t"},
+            *TRACK_LOOKUP,
             {
                 "$lookup": {
                     "from": "albums",
@@ -404,40 +366,47 @@ async def _span(db: AsyncIOMotorDatabase) -> dict:
     return {"start": fmt(first), "end": fmt(last)}
 
 
-async def build_dashboard_payload() -> dict:
+async def compute_dashboard(db: AsyncIOMotorDatabase) -> dict:
     """Compute the full dashboard payload from Mongo (read-only)."""
-    async with MongoDBConnectionManager() as db:
-        totals = await _totals(db)
-        heat, peak_hour = await _heat(db)
-        payload = {
-            **totals,
-            "total_minutes": await _total_minutes(db),
-            "plays_per_month": await _plays_per_month(db),
-            "top_artists": await _top_artists(db),
-            "top_albums": await _top_albums(db),
-            "top_tracks": await _top_tracks(db),
-            "top_genres": await _top_genres(db),
-            "heat": heat,
-            "peak_hour": peak_hour,
-            "heat_top": await _heat_top(db),
-            "shuffle_pct": await _shuffle_pct(db),
-            "era": await _era(db),
-            "streak": await _streak(db),
-            "plays_per_day": await _plays_per_day(db),
-            "span": await _span(db),
-        }
+    totals = await _totals(db)
+    heat, peak_hour = await _heat(db)
+    payload = {
+        **totals,
+        "total_minutes": await _total_minutes(db),
+        "plays_per_month": await _plays_per_month(db),
+        "top_artists": await _top_artists(db),
+        "top_albums": await _top_albums(db),
+        "top_tracks": await _top_tracks(db),
+        "top_genres": await _top_genres(db),
+        "heat": heat,
+        "peak_hour": peak_hour,
+        "heat_top": await _heat_top(db),
+        "shuffle_pct": await _shuffle_pct(db),
+        "era": await _era(db),
+        "streak": await _streak(db),
+        "plays_per_day": await _plays_per_day(db),
+        "span": await _span(db),
+    }
     payload["avg_plays_per_track"] = (
         round(payload["plays"] / payload["tracks"], 2) if payload["tracks"] else 0
     )
     return payload
 
 
-async def get_dashboard_payload() -> dict:
-    """Return the dashboard payload, served from Redis cache when warm."""
-    redis_client = get_redis_client()
-    cached = redis_client.get(DASHBOARD_CACHE_KEY)
-    if cached:
-        return json.loads(cached)
-    payload = await build_dashboard_payload()
-    redis_client.set(DASHBOARD_CACHE_KEY, json.dumps(payload), ex=DASHBOARD_TTL)
-    return payload
+async def refresh_dashboard_stats() -> dict:
+    """Recompute the materialized dashboard doc and return it. Run by the
+    scheduler and after writes that change the numbers (e.g. favorites sync)."""
+    async with MongoDBConnectionManager() as db:
+        payload = await compute_dashboard(db)
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        doc = {"_id": STATS_ID, **payload}
+        await db[STATS_COLLECTION].replace_one({"_id": STATS_ID}, doc, upsert=True)
+    return doc
+
+
+async def read_dashboard_stats() -> dict:
+    """Read the materialized dashboard doc (cheap find_one). Builds it once if
+    it does not exist yet."""
+    async with MongoDBConnectionManager() as db:
+        doc = await db[STATS_COLLECTION].find_one({"_id": STATS_ID})
+    return doc if doc is not None else await refresh_dashboard_stats()

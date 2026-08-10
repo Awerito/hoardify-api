@@ -2,14 +2,12 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app.database import MongoDBConnectionManager
-from app.services.dashboard import get_dashboard_payload
+from app.services.dashboard import DISPLAY_TZ, read_dashboard_stats
 from app.services.svg import generate_listening_grid_svg
-
-DISPLAY_TZ = "America/Santiago"
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 templates = Jinja2Templates(directory="app/templates")
@@ -159,13 +157,7 @@ async def today_stats_json():
 DASHBOARD_SECTIONS = ("header", "podio", "muro", "ritmo", "pulso", "adn")
 
 
-@router.get("/data", summary="Full dashboard payload (JSON, cached)")
-async def dashboard_data():
-    """Aggregated all-time dashboard data, served from Redis cache when warm."""
-    return JSONResponse(await get_dashboard_payload())
-
-
-@router.get("/view", response_class=HTMLResponse, summary="Music dashboard")
+@router.get("/today/view", response_class=HTMLResponse, summary="Music dashboard")
 async def dashboard_view(request: Request):
     """Server-rendered dashboard shell; sections load via htmx."""
     return templates.TemplateResponse(
@@ -179,13 +171,11 @@ async def dashboard_view(request: Request):
     summary="Dashboard section fragment",
 )
 async def dashboard_section(request: Request, name: str):
-    """htmx fragment for a single dashboard section."""
+    """htmx fragment for a single dashboard section (reads the materialized doc)."""
     if name not in DASHBOARD_SECTIONS:
         raise HTTPException(status_code=404, detail="unknown section")
-    payload = await get_dashboard_payload()
-    return templates.TemplateResponse(
-        request, f"dashboard/_{name}.html", {"d": payload}
-    )
+    d = await read_dashboard_stats()
+    return templates.TemplateResponse(request, f"dashboard/_{name}.html", {"d": d})
 
 
 async def get_plays_by_day_hour(days: int = 7) -> dict[str, dict[int, dict]]:

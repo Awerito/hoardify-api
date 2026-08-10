@@ -17,6 +17,7 @@ from app.database import MongoDBConnectionManager
 from app.scheduler.jobs.spotify import (
     poll_current_playback,
     poll_recently_played,
+    schedule_dashboard_refresh,
 )
 from app.services.plays import sync_all_missing_metadata
 
@@ -101,6 +102,7 @@ async def manual_sync_metadata(_: User = Depends(current_active_user)):
     async with MongoDBConnectionManager() as db:
         sync_result = await sync_all_missing_metadata(db, sp)
 
+    schedule_dashboard_refresh()
     return {"status": "ok", **sync_result}
 
 
@@ -153,6 +155,7 @@ async def sync_favorites(_: User = Depends(current_active_user)):
             if offset >= total:
                 break
 
+    schedule_dashboard_refresh()
     return {
         "status": "ok",
         "inserted": inserted_count,

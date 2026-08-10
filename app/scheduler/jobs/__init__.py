@@ -40,4 +40,3 @@ def register_jobs(scheduler: AsyncIOScheduler) -> None:
         id="poller_watchdog",
         replace_existing=True,
     )
-

@@ -16,6 +16,19 @@ const MES = [
   "Dic",
 ];
 
+// Wire an element's hover to the shared floating tooltip.
+function bindTip(el, tip, buildHTML) {
+  el.addEventListener("mouseenter", () => {
+    tip.innerHTML = buildHTML();
+    tip.style.display = "flex";
+  });
+  el.addEventListener("mousemove", (e) => {
+    tip.style.left = e.clientX + 14 + "px";
+    tip.style.top = e.clientY + 14 + "px";
+  });
+  el.addEventListener("mouseleave", () => (tip.style.display = "none"));
+}
+
 // ---- Tu Ritmo: ridgeline (hora x día) con hover que muestra la carátula ----
 function initRitmo(D) {
   const days = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
@@ -97,20 +110,16 @@ function initRitmo(D) {
       c.setAttribute("r", "8");
       c.setAttribute("fill", "transparent");
       c.style.cursor = "pointer";
-      c.addEventListener("mouseenter", () => {
-        tip.innerHTML =
+      bindTip(
+        c,
+        tip,
+        () =>
           (info && info.art
             ? `<img src="${info.art}" style="width:56px;height:56px;object-fit:cover;border:2px solid #fff">`
             : "") +
           `<div><div class="head text-spotify" style="font-size:13px">${days[d]} ${h}:00 · ${v} plays</div>` +
-          `<div style="font-size:12px;color:#ddd">${info ? info.label : ""}</div></div>`;
-        tip.style.display = "flex";
-      });
-      c.addEventListener("mousemove", (e) => {
-        tip.style.left = e.clientX + 14 + "px";
-        tip.style.top = e.clientY + 14 + "px";
-      });
-      c.addEventListener("mouseleave", () => (tip.style.display = "none"));
+          `<div style="font-size:12px;color:#ddd">${info ? info.label : ""}</div></div>`,
+      );
       svg.appendChild(c);
     }
   }
@@ -143,7 +152,7 @@ function initMuro(D) {
     .sort((a, b) => b.value - a.value);
   const layout = d3.treemap().tile(d3.treemapResquarify).paddingInner(3);
 
-  const tiles = albums.map((al) => {
+  albums.forEach((al) => {
     const t = document.createElement("div");
     t.className = "absolute overflow-hidden";
     t.style.transition = "opacity .3s ease";
@@ -151,20 +160,16 @@ function initMuro(D) {
     t.style.backgroundSize = "cover";
     t.style.backgroundPosition = "center";
     t.style.cursor = "pointer";
-    t.addEventListener("mouseenter", () => {
-      tip.innerHTML =
+    bindTip(
+      t,
+      tip,
+      () =>
         `<img src="${al.art}" style="width:220px;height:220px;object-fit:contain;background:#000;border:2px solid #fff">` +
         `<div><div class="head text-spotify" style="font-size:13px">${Math.round(cumPlays(al, pos))} plays</div>` +
-        `<div style="font-size:12px;color:#ddd;max-width:160px">${al.album}</div></div>`;
-      tip.style.display = "flex";
-    });
-    t.addEventListener("mousemove", (e) => {
-      tip.style.left = e.clientX + 14 + "px";
-      tip.style.top = e.clientY + 14 + "px";
-    });
-    t.addEventListener("mouseleave", () => (tip.style.display = "none"));
+        `<div style="font-size:12px;color:#ddd;max-width:160px">${al.album}</div></div>`,
+    );
+    al._tile = t;
     mo.appendChild(t);
-    return t;
   });
 
   function redraw() {
@@ -174,7 +179,7 @@ function initMuro(D) {
     root.sum((d) => cumPlays(d, pos));
     layout(root);
     root.leaves().forEach((leaf) => {
-      const t = tiles[albums.indexOf(leaf.data)];
+      const t = leaf.data._tile;
       const w = leaf.x1 - leaf.x0,
         h = leaf.y1 - leaf.y0;
       t.style.left = leaf.x0 + "px";

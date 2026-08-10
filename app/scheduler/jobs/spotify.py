@@ -23,6 +23,7 @@ from app.services.plays import (
     sync_missing_artists,
     sync_missing_album,
 )
+from app.services.dashboard import refresh_dashboard_stats
 from app.utils.logger import logger
 
 # Will be set by register_jobs
@@ -31,6 +32,22 @@ _scheduler = None
 LAST_TRACK_KEY = "spotify:last_track_id"
 SPOTIFY_API_TIMEOUT = 10  # seconds
 AUTH_ERROR_POLL_INTERVAL = 60  # seconds, slow poll while refresh token is invalid
+DASHBOARD_REFRESH_DEBOUNCE = 10  # seconds
+
+
+def schedule_dashboard_refresh() -> None:
+    """Debounced: (re)schedule one dashboard refresh a few seconds from now.
+    replace_existing coalesces a burst of writes into a single recompute, and
+    keeps the heavy aggregation off the caller's path."""
+    if _scheduler is None:
+        return
+    _scheduler.add_job(
+        refresh_dashboard_stats,
+        trigger="date",
+        run_date=datetime.now() + timedelta(seconds=DASHBOARD_REFRESH_DEBOUNCE),
+        id="refresh_dashboard_stats",
+        replace_existing=True,
+    )
 
 
 def set_scheduler(scheduler) -> None:
@@ -183,6 +200,7 @@ async def poll_current_playback():
             status = "NEW TRACK" if is_new_track else "NEW LISTEN"
             logger.info(f"[{status}] {now_playing['artist']} - {now_playing['title']}")
             schedule_reason = "new listen"
+            schedule_dashboard_refresh()
         else:
             schedule_reason = "same track"
 
@@ -250,6 +268,9 @@ async def poll_recently_played():
                 skipped += 1
                 # Still upsert track metadata but don't increment count
                 await upsert_track(db, play, increment_count=False)
+
+    if inserted > 0:
+        schedule_dashboard_refresh()
 
     logger.info(f"poll_recently_played: {inserted} inserted, {skipped} skipped")
     return {"status": "ok", "inserted": inserted, "skipped": skipped}
