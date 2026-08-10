@@ -1,0 +1,23 @@
+<section>
+  <h2 class="head text-2xl font-bold uppercase mb-1">Muro de Portadas</h2>
+  <p class="text-neutral-400 mb-4">
+    El tamaño = cuánto escuchaste cada álbum. Mueve el slider para ver cómo
+    crecen y encogen en el tiempo.
+  </p>
+  <div class="flex items-center gap-4 mb-4">
+    <input id="monthSlider" type="range" class="flex-1 accent-spotify" />
+    <span
+      id="monthLabel"
+      class="head text-spotify text-sm uppercase whitespace-nowrap"
+    ></span>
+  </div>
+  <div class="card sh p-2 bg-black">
+    <div id="mosaic" class="relative w-full" style="height: 72vh"></div>
+  </div>
+  <script type="application/json" id="muro-data">
+    {{ {"top_albums": d.top_albums, "plays_per_month": d.plays_per_month} | tojson }}
+  </script>
+  <script>
+    initMuro(JSON.parse(document.getElementById("muro-data").textContent));
+  </script>
+</section>

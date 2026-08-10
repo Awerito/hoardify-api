@@ -1,30 +1,71 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" class="dark">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}Hoardify{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-hierarchy@3/dist/d3-hierarchy.min.js"></script>
     <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        spotify: '#1DB954',
-                    }
-                }
-            }
-        }
+      tailwind.config = {
+        darkMode: "class",
+        theme: { extend: { colors: { spotify: "#1DB954" } } },
+      };
     </script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        body { font-family: 'Inter', sans-serif; }
+      @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;600;700&display=swap");
+      body {
+        font-family: "Inter", sans-serif;
+        background: #0a0a0a;
+      }
+      .head {
+        font-family: "Space Grotesk", sans-serif;
+      }
+      .sh {
+        box-shadow: 6px 6px 0 0 #1db954;
+      }
+      .sh-w {
+        box-shadow: 5px 5px 0 0 #fff;
+      }
+      .card {
+        background: #141414;
+        border: 3px solid #fff;
+      }
+      .hatch {
+        background-image: repeating-linear-gradient(
+          45deg,
+          #1db954 0 3px,
+          transparent 3px 8px
+        );
+      }
+      ::-webkit-scrollbar {
+        width: 10px;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #1db954;
+      }
     </style>
-</head>
-<body class="bg-gray-950 text-gray-100 min-h-screen">
-    <div class="container mx-auto px-4 py-8 max-w-4xl">
-        {% block content %}{% endblock %}
+    <script src="/static/dashboard.js" defer></script>
+  </head>
+  <body class="text-white min-h-screen">
+    <div class="max-w-5xl mx-auto px-4 py-10 space-y-16">
+      {% block content %}{% endblock %}
     </div>
-</body>
+    <div
+      id="tip"
+      style="
+        display: none;
+        position: fixed;
+        z-index: 50;
+        gap: 10px;
+        align-items: center;
+        background: #141414;
+        border: 3px solid #fff;
+        box-shadow: 4px 4px 0 0 #1db954;
+        padding: 8px;
+        pointer-events: none;
+      "
+    ></div>
+  </body>
 </html>

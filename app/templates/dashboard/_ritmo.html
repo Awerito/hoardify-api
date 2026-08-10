@@ -1,0 +1,22 @@
+<section>
+  <h2 class="head text-2xl font-bold uppercase mb-1">Tu Ritmo</h2>
+  <p class="text-neutral-400 mb-5">
+    A qué hora escuchas, por día de la semana. Pasa el mouse por las cumbres
+    para ver qué sonaba.
+  </p>
+  <div class="card sh p-6 overflow-x-auto">
+    <svg
+      id="ridge"
+      width="820"
+      height="430"
+      viewBox="0 0 820 430"
+      style="max-width: 100%"
+    ></svg>
+  </div>
+  <script type="application/json" id="ritmo-data">
+    {{ {"heat": d.heat, "heat_top": d.heat_top} | tojson }}
+  </script>
+  <script>
+    initRitmo(JSON.parse(document.getElementById("ritmo-data").textContent));
+  </script>
+</section>

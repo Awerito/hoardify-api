@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from app.database import MongoDBConnectionManager
+from app.services.dashboard import get_dashboard_payload
 from app.services.svg import generate_listening_grid_svg
-
 
 DISPLAY_TZ = "America/Santiago"
 
@@ -156,14 +156,35 @@ async def today_stats_json():
     return await get_today_stats()
 
 
-@router.get("/today/view", response_class=HTMLResponse, summary="View today's stats")
-async def today_stats_html(request: Request):
-    """View today's listening stats as HTML dashboard."""
-    stats = await get_today_stats()
+DASHBOARD_SECTIONS = ("header", "podio", "muro", "ritmo", "pulso", "adn")
+
+
+@router.get("/data", summary="Full dashboard payload (JSON, cached)")
+async def dashboard_data():
+    """Aggregated all-time dashboard data, served from Redis cache when warm."""
+    return JSONResponse(await get_dashboard_payload())
+
+
+@router.get("/view", response_class=HTMLResponse, summary="Music dashboard")
+async def dashboard_view(request: Request):
+    """Server-rendered dashboard shell; sections load via htmx."""
     return templates.TemplateResponse(
-        request,
-        "dashboard/today.html",
-        {"stats": stats},
+        request, "dashboard/index.html", {"sections": DASHBOARD_SECTIONS}
+    )
+
+
+@router.get(
+    "/section/{name}",
+    response_class=HTMLResponse,
+    summary="Dashboard section fragment",
+)
+async def dashboard_section(request: Request, name: str):
+    """htmx fragment for a single dashboard section."""
+    if name not in DASHBOARD_SECTIONS:
+        raise HTTPException(status_code=404, detail="unknown section")
+    payload = await get_dashboard_payload()
+    return templates.TemplateResponse(
+        request, f"dashboard/_{name}.html", {"d": payload}
     )
 
 
@@ -185,7 +206,9 @@ async def get_plays_by_day_hour(days: int = 7) -> dict[str, dict[int, dict]]:
     now_utc = now_local.astimezone(timezone.utc)
 
     # Start from beginning of hour, days ago
-    start_local = now_local.replace(minute=0, second=0, microsecond=0) - timedelta(days=days)
+    start_local = now_local.replace(minute=0, second=0, microsecond=0) - timedelta(
+        days=days
+    )
     start_utc = start_local.astimezone(timezone.utc)
 
     async with MongoDBConnectionManager() as db:

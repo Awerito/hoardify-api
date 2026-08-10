@@ -1,0 +1,29 @@
+<header>
+  <p class="head text-xs uppercase tracking-[0.3em] text-spotify mb-2">
+    {{ d.span.start }} → {{ d.span.end }}
+  </p>
+  <h1 class="head text-4xl md:text-5xl font-bold uppercase leading-none">
+    Hoarded
+  </h1>
+  <p class="text-neutral-400 mt-2 mb-5 text-sm">
+    Todo lo que escuchaste desde que empezó el hoardeo.
+  </p>
+  {% set chips = [ ('Plays', d.plays), ('Días de música', (d.total_minutes /
+  1440) | round(1)), ('Tracks', d.tracks), ('Artistas', d.artists), ('Liked
+  songs', d.favorites), ('Racha (días)', d.streak.longest), ('Tu era',
+  d.era.median), ('Shuffle', (d.shuffle_pct ~ '%') if d.shuffle_pct is not none
+  else '—'), ('Plays/track', d.avg_plays_per_track), (d.top_artists[0].name,
+  d.top_artists[0].plays) ] %}
+  <div class="grid grid-cols-3 md:grid-cols-5 gap-3">
+    {% for label, val in chips %}
+    <div class="bg-neutral-900 border-2 border-white p-3">
+      <p class="head text-2xl font-bold text-spotify">{{ val }}</p>
+      <p
+        class="head text-[10px] uppercase tracking-wide text-neutral-400 mt-1 truncate"
+      >
+        {{ label }}
+      </p>
+    </div>
+    {% endfor %}
+  </div>
+</header>

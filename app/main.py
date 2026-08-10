@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.utils.logger import logger
 from app.auth import create_admin_user
@@ -54,6 +55,9 @@ app.add_middleware(
     allow_headers=CorsConfig.allow_headers,
     max_age=CorsConfig.max_age,
 )
+
+# Static assets
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Routers
 app.include_router(healthcheck_router)

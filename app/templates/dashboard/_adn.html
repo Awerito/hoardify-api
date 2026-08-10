@@ -1,0 +1,25 @@
+<section>
+  <h2 class="head text-2xl font-bold uppercase mb-1">Tu ADN</h2>
+  <p class="text-neutral-400 mb-5">
+    Géneros por reproducciones (artistas con género tagueado).
+  </p>
+  {% set maxg = d.top_genres[0].plays %}
+  <div class="card sh p-6">
+    <div class="space-y-3">
+      {% for x in d.top_genres[:8] %}
+      <div>
+        <div class="flex justify-between head text-sm uppercase mb-1">
+          <span>{{ x.genre }}</span
+          ><span class="text-spotify">{{ x.plays }}</span>
+        </div>
+        <div class="h-5 bg-neutral-800 border-2 border-white">
+          <div
+            class="h-full bg-spotify"
+            style="width:{{ (x.plays / maxg * 100) | round(1) }}%"
+          ></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>

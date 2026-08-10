@@ -1,0 +1,48 @@
+<section>
+  <h2 class="head text-2xl font-bold uppercase mb-1">El Podio</h2>
+  <p class="text-neutral-400 mb-5">Tus artistas por reproducciones.</p>
+  {% set cfg = {0: ('aspect-[3/4]', 'h-56'), 1: ('aspect-square', 'h-40'), 2:
+  ('aspect-square', 'h-28')} %}
+  <div class="grid grid-cols-3 gap-4 items-end mb-4">
+    {% for idx in [1, 0, 2] %} {% set a = d.top_artists[idx] %} {% set img =
+    cfg[idx][0] %} {% set ped = cfg[idx][1] %}
+    <div class="flex flex-col items-center">
+      <img
+        src="{{ a.image }}"
+        class="w-full {{ img }} object-cover border-[3px] border-white {{ 'sh' if idx == 0 else 'sh-w' }}"
+      />
+      <div
+        class="w-full {{ 'bg-spotify' if idx == 0 else 'bg-neutral-800' }} border-[3px] border-white border-t-0 {{ ped }} flex flex-col items-center justify-center"
+      >
+        <span
+          class="head {{ 'text-5xl' if idx == 0 else 'text-3xl' }} font-bold {{ 'text-black' if idx == 0 else 'text-white' }}"
+          >#{{ idx + 1 }}</span
+        >
+        <span
+          class="head text-sm {{ 'text-black' if idx == 0 else 'text-neutral-300' }} px-1 text-center truncate w-full"
+          >{{ a.name }}</span
+        >
+        <span
+          class="head text-xs {{ 'text-black/70' if idx == 0 else 'text-neutral-500' }}"
+          >{{ a.plays }} plays</span
+        >
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="grid md:grid-cols-2 gap-3">
+    {% for a in d.top_artists[3:] %}
+    <div class="flex items-center gap-3 card p-2">
+      <span class="head w-6 text-neutral-500">{{ loop.index + 3 }}</span>
+      <img
+        src="{{ a.image }}"
+        class="w-10 h-10 object-cover border-2 border-white"
+      />
+      <span class="flex-1 truncate">{{ a.name }}</span>
+      <span class="head text-spotify text-sm border-2 border-spotify px-2"
+        >{{ a.plays }}</span
+      >
+    </div>
+    {% endfor %}
+  </div>
+</section>

@@ -1,0 +1,27 @@
+{% set MESES =
+['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'] %}
+<section>
+  <h2 class="head text-2xl font-bold uppercase mb-1">El Pulso</h2>
+  <p class="text-neutral-400 mb-5">Plays por mes.</p>
+  {% set maxm = d.plays_per_month | map(attribute='plays') | max %}
+  <div class="card sh p-6">
+    <div class="flex items-end gap-2" style="height: 220px">
+      {% for x in d.plays_per_month %} {% set peak = x.plays == maxm %} {% set
+      hpx = [ ((x.plays / maxm) * 180) | int, 6] | max %}
+      <div class="flex-1 flex flex-col items-center gap-2">
+        <span
+          class="head text-xs {{ 'text-spotify' if peak else 'text-neutral-500' }}"
+          >{{ x.plays }}</span
+        >
+        <div
+          class="w-full {{ 'hatch border-2 border-spotify' if loop.last else ('bg-spotify' if peak else 'bg-spotify/60') }}"
+          style="height:{{ hpx }}px"
+        ></div>
+        <span class="head text-xs uppercase text-neutral-400"
+          >{{ MESES[x.month[5:7]|int - 1] }}</span
+        >
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
