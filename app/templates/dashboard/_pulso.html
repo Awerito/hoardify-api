@@ -1,8 +1,8 @@
-{% set MESES =
-['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'] %}
+{% set MONTHS =
+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}
 <section>
-  <h2 class="head text-2xl font-bold uppercase mb-1">El Pulso</h2>
-  <p class="text-neutral-400 mb-5">Plays por mes.</p>
+  <h2 class="head text-2xl font-bold uppercase mb-1">The Pulse</h2>
+  <p class="text-neutral-400 mb-5">Plays per month.</p>
   {% set maxm = d.plays_per_month | map(attribute='plays') | max %}
   <div class="card sh p-6">
     <div class="flex items-end gap-2" style="height: 220px">
@@ -18,7 +18,7 @@
           style="height:{{ hpx }}px"
         ></div>
         <span class="head text-xs uppercase text-neutral-400"
-          >{{ MESES[x.month[5:7]|int - 1] }}</span
+          >{{ MONTHS[x.month[5:7]|int - 1] }}</span
         >
       </div>
       {% endfor %}

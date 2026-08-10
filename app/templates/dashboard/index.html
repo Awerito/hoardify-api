@@ -1,6 +1,6 @@
 {% extends "base.html" %} {% block title %}Hoarded — Hoardify{% endblock %} {%
 block content %} {% for s in sections %}
 <div hx-get="/dashboard/section/{{ s }}" hx-trigger="load" hx-swap="outerHTML">
-  <div class="head text-neutral-600 text-sm uppercase">Cargando {{ s }}…</div>
+  <div class="head text-neutral-600 text-sm uppercase">Loading {{ s }}…</div>
 </div>
 {% endfor %} {% endblock %}

@@ -2,18 +2,18 @@
 // initRitmo(data) / initMuro(data) with their slice of the cached payload.
 
 const MES = [
-  "Ene",
+  "Jan",
   "Feb",
   "Mar",
-  "Abr",
+  "Apr",
   "May",
   "Jun",
   "Jul",
-  "Ago",
+  "Aug",
   "Sep",
   "Oct",
   "Nov",
-  "Dic",
+  "Dec",
 ];
 
 // Wire an element's hover to the shared floating tooltip.
@@ -29,9 +29,9 @@ function bindTip(el, tip, buildHTML) {
   el.addEventListener("mouseleave", () => (tip.style.display = "none"));
 }
 
-// ---- Tu Ritmo: ridgeline (hora x día) con hover que muestra la carátula ----
+// ---- Your Rhythm: ridgeline (hour x weekday) with hover showing the cover ----
 function initRitmo(D) {
-  const days = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const heat = D.heat,
     top = D.heat_top;
   const NS = "http://www.w3.org/2000/svg";
@@ -125,7 +125,7 @@ function initRitmo(D) {
   }
 }
 
-// ---- Muro de Portadas: treemap con slider de mes (crece/encoge en su lugar) ----
+// ---- Cover Wall: treemap with a month slider (tiles grow/shrink in place) ----
 function initMuro(D) {
   const mo = document.getElementById("mosaic");
   if (!mo) return;
@@ -133,7 +133,7 @@ function initMuro(D) {
   const albums = D.top_albums.slice(0, 28);
   const monthsList = D.plays_per_month.map((x) => x.month);
   const NMON = monthsList.length;
-  let pos = NMON; // posición continua 0..NMON, arranca en all-time
+  let pos = NMON; // continuous position 0..NMON, starts at all-time
   const fmtMonth = (ym) => {
     const [y, m] = ym.split("-");
     return MES[+m - 1] + " " + y.slice(2);
@@ -198,7 +198,7 @@ function initMuro(D) {
   slider.value = String(pos);
   const updateLabel = () =>
     (mlabel.textContent =
-      "Hasta " + fmtMonth(monthsList[Math.min(Math.floor(pos), NMON - 1)]));
+      "Through " + fmtMonth(monthsList[Math.min(Math.floor(pos), NMON - 1)]));
   slider.addEventListener("input", () => {
     pos = +slider.value;
     updateLabel();

@@ -6,11 +6,11 @@
     Hoarded
   </h1>
   <p class="text-neutral-400 mt-2 mb-5 text-sm">
-    Todo lo que escuchaste desde que empezó el hoardeo.
+    Everything you've played since the hoarding began.
   </p>
-  {% set chips = [ ('Plays', d.plays), ('Días de música', (d.total_minutes /
-  1440) | round(1)), ('Tracks', d.tracks), ('Artistas', d.artists), ('Liked
-  songs', d.favorites), ('Racha (días)', d.streak.longest), ('Tu era',
+  {% set chips = [ ('Plays', d.plays), ('Days of music', (d.total_minutes /
+  1440) | round(1)), ('Tracks', d.tracks), ('Artists', d.artists), ('Liked
+  songs', d.favorites), ('Streak (days)', d.streak.longest), ('Your era',
   d.era.median), ('Shuffle', (d.shuffle_pct ~ '%') if d.shuffle_pct is not none
   else '—'), ('Plays/track', d.avg_plays_per_track), (d.top_artists[0].name,
   d.top_artists[0].plays) ] %}
