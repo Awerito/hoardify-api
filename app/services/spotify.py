@@ -10,12 +10,13 @@ from app.config import RedisConfig, SpotifyConfig
 
 NOW_PLAYING_CACHE_KEY = "now_playing"
 NOW_PLAYING_SVG_CACHE_KEY = "now_playing_svg"
+SPOTIFY_TOKEN_KEY = "spotify_token"
 
 
 class RedisCacheHandler(CacheHandler):
     """Cache handler that stores Spotify tokens in Redis."""
 
-    def __init__(self, redis_client: redis.Redis, key: str = "spotify_token"):
+    def __init__(self, redis_client: redis.Redis, key: str = SPOTIFY_TOKEN_KEY):
         self.redis = redis_client
         self.key = key
 
@@ -112,9 +113,7 @@ def get_current_playback(sp: spotipy.Spotify) -> dict | None:
             "album": track["album"]["name"],
             "album_id": track["album"]["id"],
             "album_art": (
-                track["album"]["images"][0]["url"]
-                if track["album"]["images"]
-                else None
+                track["album"]["images"][0]["url"] if track["album"]["images"] else None
             ),
             "duration_ms": track["duration_ms"],
             "explicit": track.get("explicit"),
@@ -135,9 +134,7 @@ def get_current_playback(sp: spotipy.Spotify) -> dict | None:
             "artist": ", ".join(a["name"] for a in track["artists"]),
             "album": track["album"]["name"],
             "album_art": (
-                track["album"]["images"][0]["url"]
-                if track["album"]["images"]
-                else None
+                track["album"]["images"][0]["url"] if track["album"]["images"] else None
             ),
             "url": track["external_urls"]["spotify"],
             "progress_ms": progress_ms,

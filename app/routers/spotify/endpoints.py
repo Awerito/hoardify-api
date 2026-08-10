@@ -35,8 +35,10 @@ async def authorize(_: User = Depends(current_active_user)):
 async def callback(code: str):
     """OAuth callback endpoint. Stores token in Redis."""
     auth_manager = get_auth_manager()
-    auth_manager.get_access_token(code)
-    return {"message": "Authentication successful. You can now use /spotify/now-playing"}
+    auth_manager.get_access_token(code, check_cache=False)
+    return {
+        "message": "Authentication successful. You can now use /spotify/now-playing"
+    }
 
 
 @router.get("/now-playing", summary="Get current track")

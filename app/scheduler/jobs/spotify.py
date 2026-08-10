@@ -1,6 +1,8 @@
 import asyncio
 from datetime import datetime, timedelta
 
+from spotipy.exceptions import SpotifyOauthError
+
 from app.database import MongoDBConnectionManager
 from app.services.cache import ensure_album_art_cached
 from app.services.spotify import (
@@ -12,6 +14,7 @@ from app.services.spotify import (
     cache_now_playing,
     cache_now_playing_svg,
     NOW_PLAYING_SVG_CACHE_KEY,
+    SPOTIFY_TOKEN_KEY,
 )
 from app.services.svg import generate_now_playing_svg
 from app.services.plays import (
@@ -27,6 +30,7 @@ _scheduler = None
 
 LAST_TRACK_KEY = "spotify:last_track_id"
 SPOTIFY_API_TIMEOUT = 10  # seconds
+AUTH_ERROR_POLL_INTERVAL = 60  # seconds, slow poll while refresh token is invalid
 
 
 def set_scheduler(scheduler) -> None:
@@ -35,19 +39,25 @@ def set_scheduler(scheduler) -> None:
     _scheduler = scheduler
 
 
-def _schedule_next_poll(requests_made: int = 1, reason: str = "") -> None:
+def _schedule_next_poll(
+    requests_made: int = 1, reason: str = "", interval: float | None = None
+) -> None:
     """
     Schedule next poll based on requests made this cycle.
 
     Simple logic:
     - 1 request (known track) → next poll in 1s
     - 2+ requests (new track) → next poll in 2s
+    - explicit interval overrides the adaptive value
     """
     if _scheduler is None:
         logger.error("Cannot schedule next poll: scheduler is None")
         return
 
-    next_interval = 2.0 if requests_made > 1 else 1.0
+    if interval is not None:
+        next_interval = interval
+    else:
+        next_interval = 2.0 if requests_made > 1 else 1.0
     next_run = datetime.now() + timedelta(seconds=next_interval)
 
     try:
@@ -69,10 +79,21 @@ async def poll_current_playback():
     """Poll current playback, detect track changes, update tracks + plays."""
     requests_made = 0
     schedule_reason = "poll"
+    auth_failed = False
 
     try:
         auth_manager = get_auth_manager()
-        token_info = auth_manager.get_cached_token()
+        try:
+            token_info = auth_manager.get_cached_token()
+        except SpotifyOauthError:
+            auth_failed = True
+            get_redis_client().delete(SPOTIFY_TOKEN_KEY)
+            logger.warning(
+                "Spotify refresh token expired/revoked — "
+                "re-authorize via /spotify/authorize"
+            )
+            schedule_reason = "auth expired"
+            return {"status": "skipped", "reason": "auth expired"}
         if not token_info:
             logger.warning("poll_current_playback skipped: no token cached")
             schedule_reason = "no token"
@@ -173,7 +194,12 @@ async def poll_current_playback():
         return {"status": "error", "reason": str(e)}
 
     finally:
-        _schedule_next_poll(requests_made, schedule_reason)
+        if auth_failed:
+            _schedule_next_poll(
+                reason=schedule_reason, interval=AUTH_ERROR_POLL_INTERVAL
+            )
+        else:
+            _schedule_next_poll(requests_made, schedule_reason)
 
 
 def ensure_poller_alive() -> None:
@@ -193,7 +219,13 @@ def ensure_poller_alive() -> None:
 async def poll_recently_played():
     """Poll recently played every hour, backfill plays log."""
     auth_manager = get_auth_manager()
-    token_info = auth_manager.get_cached_token()
+    try:
+        token_info = auth_manager.get_cached_token()
+    except SpotifyOauthError:
+        logger.warning(
+            "Spotify refresh token expired/revoked — re-authorize via /spotify/authorize"
+        )
+        return {"status": "skipped", "reason": "auth expired"}
     if not token_info:
         return {"status": "skipped", "reason": "not authenticated"}
 
