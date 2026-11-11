@@ -1,6 +1,7 @@
 import asyncio
+import secrets
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
 
 from app.auth import User, current_active_user
@@ -24,19 +25,31 @@ from app.services.plays import sync_all_missing_metadata
 router = APIRouter(prefix="/spotify", tags=["Spotify"])
 
 
+OAUTH_STATE_KEY = "spotify:oauth_state:{}"
+OAUTH_STATE_TTL = 600  # seconds
+
+
 @router.get("/authorize", summary="Get Spotify OAuth URL")
 async def authorize(_: User = Depends(current_active_user)):
     """Protected endpoint that returns the Spotify authorization URL."""
+    state = secrets.token_urlsafe(32)
+    get_redis_client().set(OAUTH_STATE_KEY.format(state), 1, ex=OAUTH_STATE_TTL)
     auth_manager = get_auth_manager()
-    auth_url = auth_manager.get_authorize_url()
+    auth_url = auth_manager.get_authorize_url(state=state)
     return {"auth_url": auth_url}
 
 
 @router.get("/callback", summary="Spotify OAuth callback")
-async def callback(code: str):
+async def callback(state: str, code: str | None = None, error: str | None = None):
     """OAuth callback endpoint. Stores token in Redis."""
+    if not get_redis_client().delete(OAUTH_STATE_KEY.format(state)):
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    if error:
+        raise HTTPException(
+            status_code=400, detail=f"Spotify authorization failed: {error}"
+        )
     auth_manager = get_auth_manager()
-    auth_manager.get_access_token(code, check_cache=False)
+    await asyncio.to_thread(auth_manager.get_access_token, code, check_cache=False)
     return {
         "message": "Authentication successful. You can now use /spotify/now-playing"
     }
