@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import spotipy
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.errors import DuplicateKeyError
 
 from app.services.rate_limiter import spotify_rate_limiter
 from app.utils.logger import logger
@@ -30,7 +31,7 @@ async def upsert_track(
 
     Returns True if inserted (new track), False if updated.
     """
-    now = datetime.now(timezone.utc)
+    played_at = parse_iso_datetime(track["played_at"])
 
     filter_doc = {"track_id": track["track_id"]}
 
@@ -48,12 +49,10 @@ async def upsert_track(
             "disc_number": track.get("disc_number"),
             "track_number": track.get("track_number"),
             "isrc": track.get("isrc"),
-            "last_listened": now,
         },
-        "$setOnInsert": {
-            "track_id": track["track_id"],
-            "first_listened": now,
-        },
+        "$setOnInsert": {"track_id": track["track_id"]},
+        "$min": {"first_listened": played_at},
+        "$max": {"last_listened": played_at},
         "$inc": {"listen_count": 1 if increment_count else 0},
     }
 
@@ -89,8 +88,7 @@ async def insert_play(db: AsyncIOMotorDatabase, play: dict) -> bool:
     try:
         await db.plays.insert_one(doc)
         return True
-    except Exception:
-        # Duplicate key error - play already logged
+    except DuplicateKeyError:
         return False
 
 
@@ -295,9 +293,7 @@ async def sync_all_missing_metadata(
                         "genres": artist.get("genres", []),
                         "popularity": artist.get("popularity"),
                         "image": (
-                            artist["images"][0]["url"]
-                            if artist.get("images")
-                            else None
+                            artist["images"][0]["url"] if artist.get("images") else None
                         ),
                     }
                 )

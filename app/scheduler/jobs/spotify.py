@@ -174,28 +174,19 @@ async def poll_current_playback():
 
         if is_new_listen:
             async with MongoDBConnectionManager() as db:
-                # Upsert track (increments listen_count)
-                is_new_track = await upsert_track(db, play, increment_count=True)
+                inserted = await insert_play(db, play)
+                is_new_track = await upsert_track(db, play, increment_count=inserted)
+                redis_client.set(LAST_TRACK_KEY, current_track_id)
 
-                # Insert play to log
-                await insert_play(db, play)
+                artists_synced = await sync_missing_artists(
+                    db, sp, play.get("artist_ids", [])
+                )
+                if artists_synced > 0:
+                    requests_made += 1
 
-                # Sync missing artists/album if new track
-                if is_new_track:
-                    artists_synced = await sync_missing_artists(
-                        db, sp, play.get("artist_ids", [])
-                    )
-                    if artists_synced > 0:
-                        requests_made += 1
-
-                    album_synced = await sync_missing_album(
-                        db, sp, play.get("album_id")
-                    )
-                    if album_synced > 0:
-                        requests_made += 1
-
-            # Update last track in Redis
-            redis_client.set(LAST_TRACK_KEY, current_track_id)
+                album_synced = await sync_missing_album(db, sp, play.get("album_id"))
+                if album_synced > 0:
+                    requests_made += 1
 
             status = "NEW TRACK" if is_new_track else "NEW LISTEN"
             logger.info(f"[{status}] {now_playing['artist']} - {now_playing['title']}")
