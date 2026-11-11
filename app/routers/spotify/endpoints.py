@@ -4,7 +4,7 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
 
-from app.auth import User, current_active_user
+from app.auth import require_admin
 from app.services.spotify import (
     get_auth_manager,
     get_spotify_client,
@@ -30,7 +30,7 @@ OAUTH_STATE_TTL = 600  # seconds
 
 
 @router.get("/authorize", summary="Get Spotify OAuth URL")
-async def authorize(_: User = Depends(current_active_user)):
+async def authorize(_: None = Depends(require_admin)):
     """Protected endpoint that returns the Spotify authorization URL."""
     state = secrets.token_urlsafe(32)
     get_redis_client().set(OAUTH_STATE_KEY.format(state), 1, ex=OAUTH_STATE_TTL)
@@ -89,21 +89,21 @@ async def now_playing_svg():
 
 
 @router.post("/poll/current-playback", summary="Manually poll current playback")
-async def manual_poll_current_playback(_: User = Depends(current_active_user)):
+async def manual_poll_current_playback(_: None = Depends(require_admin)):
     """Manually trigger current playback poll."""
     result = await poll_current_playback()
     return result
 
 
 @router.post("/poll/recently-played", summary="Manually poll recently played")
-async def manual_poll_recently_played(_: User = Depends(current_active_user)):
+async def manual_poll_recently_played(_: None = Depends(require_admin)):
     """Manually trigger recently played poll."""
     result = await poll_recently_played()
     return result
 
 
 @router.post("/sync-metadata", summary="Sync all missing metadata")
-async def manual_sync_metadata(_: User = Depends(current_active_user)):
+async def manual_sync_metadata(_: None = Depends(require_admin)):
     """Sync missing artists and albums from tracks collection."""
     auth_manager = get_auth_manager()
     token_info = auth_manager.get_cached_token()
@@ -120,7 +120,7 @@ async def manual_sync_metadata(_: User = Depends(current_active_user)):
 
 
 @router.post("/sync-favorites", summary="Sync liked songs to favorites collection")
-async def sync_favorites(_: User = Depends(current_active_user)):
+async def sync_favorites(_: None = Depends(require_admin)):
     """Sync Spotify liked songs to favorites collection.
 
     Paginates through liked songs until finding a full page of already-known tracks.

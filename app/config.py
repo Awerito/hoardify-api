@@ -41,12 +41,12 @@ class CorsConfig:
 
 
 class SecurityConfig:
-    secret_key = os.getenv("SECRET_KEY", "supersecretkey")
+    secret_key = os.environ["SECRET_KEY"]
     algorithm = os.getenv("ALGORITHM", "HS256")
     access_token_duration_minutes = int(
         os.getenv("ACCESS_TOKEN_DURATION_MINUTES", "30")
     )
-    admin_password_hash = os.getenv("ADMIN_PASSWORD_HASH", "")
+    admin_password_hash = os.environ["ADMIN_PASSWORD_HASH"]
 
 
 class DatabaseConfig:

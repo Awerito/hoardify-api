@@ -5,7 +5,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.utils.logger import logger
-from app.auth import create_admin_user
 from app.database import check_mongo_connection
 from app.config import FastAPIConfig, CorsConfig, ENV
 from app.scheduler import start_scheduler, stop_scheduler
@@ -17,12 +16,6 @@ from app.routers.spotify.endpoints import router as spotify_router
 from app.routers.dashboard.endpoints import router as dashboard_router
 
 
-async def on_db_ready(db):
-    """Run setup tasks after database connection is ready."""
-    await create_admin_user(db)
-    await ensure_indexes(db)
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """
@@ -32,7 +25,7 @@ async def lifespan(_: FastAPI):
         logger.warning("Running in development mode!")
 
     # Check database connection and run setup
-    await check_mongo_connection(on_ready=on_db_ready)
+    await check_mongo_connection(on_ready=ensure_indexes)
 
     # Start scheduler
     start_scheduler()
