@@ -7,11 +7,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 
 # Builder
 FROM base AS builder
-WORKDIR /install
-COPY requirements.txt .
-RUN python -m venv /venv \
-  && /venv/bin/pip install --upgrade pip \
-  && /venv/bin/pip install -r requirements.txt
+COPY --from=ghcr.io/astral-sh/uv:0.10.0 /uv /bin/
+ENV UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=0 UV_PROJECT_ENVIRONMENT=/venv
+RUN --mount=type=cache,target=/root/.cache/uv \
+  --mount=type=bind,source=uv.lock,target=uv.lock \
+  --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+  uv sync --locked --no-install-project --no-dev
 
 # Final
 FROM base

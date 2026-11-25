@@ -19,11 +19,10 @@ Personal Spotify listening history hoarding API. Tracks what you listen to and s
 ```bash
 git clone https://github.com/Awerito/hoardify-api.git
 cd hoardify-api
-python -m venv env && source env/bin/activate
-pip install -r requirements.txt
+uv sync
 cp sample.env .env
 # Edit .env with your credentials
-uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload
 ```
 
 Docs: http://localhost:8000/docs
@@ -95,7 +94,8 @@ SPOTIPY_REDIRECT_URI=http://localhost:8000/spotify/callback
 │   ├── config.py
 │   └── main.py
 ├── Dockerfile
-├── requirements.txt
+├── pyproject.toml
+├── uv.lock
 └── sample.env
 ```
 

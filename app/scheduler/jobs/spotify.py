@@ -30,6 +30,7 @@ from app.utils.logger import logger
 _scheduler = None
 
 LAST_TRACK_KEY = "spotify:last_track_id"
+_poll_running = False
 SPOTIFY_API_TIMEOUT = 10  # seconds
 AUTH_ERROR_POLL_INTERVAL = 60  # seconds, slow poll while refresh token is invalid
 DASHBOARD_REFRESH_DEBOUNCE = 10  # seconds
@@ -94,6 +95,8 @@ def _schedule_next_poll(
 
 async def poll_current_playback():
     """Poll current playback, detect track changes, update tracks + plays."""
+    global _poll_running
+    _poll_running = True
     requests_made = 0
     schedule_reason = "poll"
     auth_failed = False
@@ -209,12 +212,16 @@ async def poll_current_playback():
             )
         else:
             _schedule_next_poll(requests_made, schedule_reason)
+        _poll_running = False
 
 
 def ensure_poller_alive() -> None:
     """Watchdog: ensure poll_current_playback job exists, revive if dead."""
     if _scheduler is None:
         logger.error("Watchdog: scheduler is None")
+        return
+
+    if _poll_running:
         return
 
     job = _scheduler.get_job("poll_current_playback")
