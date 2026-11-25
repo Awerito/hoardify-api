@@ -1,5 +1,11 @@
 {% extends "base.html" %} {% block title %}Hoarded — Hoardify{% endblock %} {%
-block content %} {% for s in sections %}
+block content %}
+<div
+  hx-get="/spotify/now-playing.svg"
+  hx-trigger="load, every 5s"
+  class="sh border-[3px] border-white [&>svg]:block [&>svg]:w-full [&>svg]:h-auto"
+></div>
+{% for s in sections %}
 <div hx-get="/dashboard/section/{{ s }}" hx-trigger="load" hx-swap="outerHTML">
   <div class="head text-neutral-600 text-sm uppercase">Loading {{ s }}…</div>
 </div>
